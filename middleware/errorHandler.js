@@ -33,6 +33,12 @@ function errorHandler(err, req, res, next) {
     status = 400;
     code = 'invalid_json';
     message = 'Request body is not valid JSON';
+  } else if (err && err.name === 'MulterError') {
+    status = 400;
+    code = err.code === 'LIMIT_FILE_SIZE' ? 'payment_proof_too_large' : 'invalid_payment_proof';
+    message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Payment proof must be 5 MB or smaller.'
+      : 'Upload one JPG, PNG, or WebP payment proof.';
   }
 
   if (status >= 500) {

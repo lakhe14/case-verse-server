@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "db:init": "node scripts/initDb.js",
     "db:seed": "node scripts/seed.js",
+    "db:migrate-payment-confirmations": "node scripts/migratePaymentConfirmations.js",
     "db:reset": "node scripts/initDb.js --drop && node scripts/seed.js",
     "db:remove-legacy-bags": "node scripts/removeLegacyBags.js",
     "dev:reset-accounts": "node scripts/resetDevAccounts.js",

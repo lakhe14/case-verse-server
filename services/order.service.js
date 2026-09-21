@@ -376,11 +376,11 @@ async function adminGetOrder(orderId, transaction) {
   return shapeOrder(order);
 }
 
-async function updateOrderStatus(orderId, { status, note }, staffId) {
+async function transitionOrderStatus(orderId, { status, note }, staffId, transaction) {
   if (!ORDER_STATUSES.includes(status)) {
     throw ApiError.badRequest('Unknown status', 'bad_status');
   }
-  return db.sequelize.transaction(async (t) => {
+  const transition = async (t) => {
     const order = await db.Order.findByPk(orderId, {
       include: [{ model: db.OrderItem, as: 'items' }],
       lock: t.LOCK.UPDATE,
@@ -420,7 +420,12 @@ async function updateOrderStatus(orderId, { status, note }, staffId) {
     }
 
     return adminGetOrder(orderId, t);
-  });
+  };
+  return transaction ? transition(transaction) : db.sequelize.transaction(transition);
+}
+
+async function updateOrderStatus(orderId, payload, staffId) {
+  return transitionOrderStatus(orderId, payload, staffId);
 }
 
 module.exports = {
@@ -432,5 +437,6 @@ module.exports = {
   getUserOrder,
   adminListOrders,
   adminGetOrder,
+  transitionOrderStatus,
   updateOrderStatus,
 };

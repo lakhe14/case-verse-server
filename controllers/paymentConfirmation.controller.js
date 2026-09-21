@@ -1,11 +1,19 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const asyncHandler = require('../utils/asyncHandler');
 const payments = require('../services/paymentConfirmation.service');
 
 exports.uploadProof = asyncHandler(async (req, res) => {
-  res.status(201).json({ data: await payments.uploadProof(req.auth.id, req.params.id, req.file) });
+  try {
+    res.status(201).json({ data: await payments.uploadProof(req.auth.id, req.params.id, req.file) });
+  } catch (error) {
+    // Multer stores the file before the ownership/eligibility check. Never leave
+    // an orphaned private upload when that business check rejects the request.
+    if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {});
+    throw error;
+  }
 });
 exports.requestCod = asyncHandler(async (req, res) => {
   res.json({ data: await payments.requestCod(req.auth.id, req.params.id) });

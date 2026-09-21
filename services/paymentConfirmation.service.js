@@ -5,6 +5,7 @@ const path = require('path');
 const { Op } = require('sequelize');
 const db = require('../models');
 const env = require('../config/env');
+const orderService = require('./order.service');
 const ApiError = require('../utils/ApiError');
 const { proofDir } = require('../middleware/paymentProofUpload');
 
@@ -62,8 +63,12 @@ async function review(id, action, staffId, note) {
     const isCod = confirmation.status === 'cod_pending';
     if (action === 'approve') {
       await confirmation.update({ status: isCod ? 'cod_confirmed' : 'approved', reviewed_by_staff_id: staffId, reviewed_at: new Date(), admin_note: note || null }, { transaction });
-      await confirmation.order.update({ status: 'processing' }, { transaction });
-      await db.OrderStatusHistory.create({ order_id: confirmation.order_id, status: 'processing', changed_by_staff_id: staffId, note: isCod ? 'COD confirmed by staff' : 'Advance payment verified' }, { transaction });
+      await orderService.transitionOrderStatus(
+        confirmation.order_id,
+        { status: 'processing', note: isCod ? 'COD confirmed by staff' : 'Advance payment verified' },
+        staffId,
+        transaction
+      );
     } else {
       if (isCod) throw ApiError.badRequest('COD requests can only be confirmed.', 'invalid_payment_review');
       await confirmation.update({ status: 'rejected', reviewed_by_staff_id: staffId, reviewed_at: new Date(), admin_note: note || 'Payment proof could not be verified.' }, { transaction });
