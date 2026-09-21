@@ -11,6 +11,7 @@ router.use(requireAuth, requireType('staff'));
 
 router.use(require('./catalog.routes'));
 router.use(require('./order.routes'));
+router.use(require('./paymentConfirmation.routes'));
 router.use(require('./review.routes'));
 router.use(require('./coupon.routes'));
 router.use(require('./analytics.routes'));

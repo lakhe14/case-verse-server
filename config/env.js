@@ -96,6 +96,11 @@ const env = {
     earnRate: parseFloat(process.env.LOYALTY_EARN_RATE || '0.02'),
     pointValue: parseFloat(process.env.LOYALTY_POINT_VALUE || '1'),
   },
+
+  payment: {
+    advanceAmount: parseFloat(process.env.PAYMENT_ADVANCE_AMOUNT || '100'),
+    provider: process.env.PAYMENT_PROVIDER || 'eSewa',
+  },
 };
 
 module.exports = env;

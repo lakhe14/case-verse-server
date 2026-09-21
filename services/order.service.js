@@ -279,6 +279,16 @@ async function placeOrder(userId, payload) {
       { transaction: t }
     );
 
+    await db.OrderPaymentConfirmation.create(
+      {
+        order_id: order.id,
+        method: 'advance_qr',
+        advance_amount: env.payment.advanceAmount,
+        status: 'pending',
+      },
+      { transaction: t }
+    );
+
     // Empty the cart.
     await db.CartItem.destroy({ where: { cart_id: cart.id }, transaction: t });
 
@@ -302,6 +312,7 @@ const orderInclude = [
   { model: db.Address, as: 'shippingAddress' },
   { model: db.Address, as: 'billingAddress' },
   { model: db.Coupon, as: 'coupon' },
+  { model: db.OrderPaymentConfirmation, as: 'paymentConfirmation' },
 ];
 
 function shapeOrder(order) {

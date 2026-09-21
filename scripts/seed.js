@@ -13,6 +13,7 @@ const { slugify } = require('../utils/slug');
 const PERMISSIONS = [
   ['manage_products', 'Create, edit and delete products, variants and images'],
   ['manage_orders', 'View orders and update their status'],
+  ['manage_order_payments', 'Review advance-payment proofs and confirm COD orders'],
   ['manage_reviews', 'Approve or reject product reviews'],
   ['manage_coupons', 'Create and manage coupons and campaigns'],
   ['view_analytics', 'View sales and traffic analytics'],
@@ -24,7 +25,7 @@ const PERMISSIONS = [
 const ROLES = {
   'Super Admin': PERMISSIONS.map((permission) => permission[0]),
   'Product Manager': ['manage_products', 'view_analytics'],
-  'Order Manager': ['manage_orders', 'manage_reviews', 'manage_customers'],
+  'Order Manager': ['manage_orders', 'manage_order_payments', 'manage_reviews', 'manage_customers'],
   Support: ['manage_customers'],
 };
 
