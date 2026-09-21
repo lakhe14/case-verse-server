@@ -1,0 +1,49 @@
+### CaseVerse API scratch requests
+### Set local account values in your HTTP-client environment; do not commit them.
+@base = http://localhost:4000/api
+@customerEmail = local-customer@example.test
+@customerPassword = set_in_your_local_http_environment
+@staffEmail = local-staff@example.test
+@staffPassword = set_in_your_local_http_environment
+
+### Health
+GET {{base}}/health
+
+### Register a customer
+# @name register
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{ "name": "Asha Rai", "email": "{{customerEmail}}", "password": "{{customerPassword}}", "phone": "9800000000" }
+
+### Login
+# @name login
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+@token = {{login.response.body.accessToken}}
+
+### Staff login
+# @name staffLogin
+POST {{base}}/staff/login
+Content-Type: application/json
+
+{ "email": "{{staffEmail}}", "password": "{{staffPassword}}" }
+
+@adminToken = {{staffLogin.response.body.accessToken}}
+
+### Browse products
+GET {{base}}/products?category=iphone-covers&sort=newest
+
+### Add an address
+POST {{base}}/addresses
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "recipient_name": "Asha Rai", "phone": "9800000000", "line1": "Jhamsikhel", "city": "Kathmandu" }
+
+### Admin: list orders
+GET {{base}}/admin/orders
+Authorization: Bearer {{adminToken}}

@@ -1,0 +1,30 @@
+node_modules/
+
+.env
+.env.*
+!.env.example
+
+*.log
+logs/
+coverage/
+.cache/
+.tmp/
+temp/
+
+# Public catalogue images may be intentionally versioned in uploads/.
+# Private/customer-uploaded material must never be committed.
+uploads/payment-proofs/
+uploads/private/
+uploads/tmp/
+private-uploads/
+
+*.sql.gz
+*.dump
+*.bak
+*.sqlite
+*.db
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
