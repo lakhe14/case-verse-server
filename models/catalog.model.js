@@ -65,6 +65,9 @@ module.exports = (sequelize) => {
       product_id: { type: DataTypes.INTEGER, allowNull: false },
       sku: { type: DataTypes.STRING(64), allowNull: false, unique: true },
       price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+      // The regular reference price shown next to a lower active sale price.
+      // Order item snapshots continue to use `price` at the time of checkout.
+      compare_at_price: { type: DataTypes.DECIMAL(10, 2), allowNull: true },
       stock_quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

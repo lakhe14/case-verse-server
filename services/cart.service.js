@@ -48,6 +48,7 @@ async function shapeCart(cart, transaction) {
       variant_id: item.variant_id,
       quantity: item.quantity,
       unit_price: unitPrice,
+      compare_at_price: variant?.compare_at_price == null ? null : Number(variant.compare_at_price),
       line_total: Number((unitPrice * item.quantity).toFixed(2)),
       available_stock: available,
       stock_ok: variant ? variant.is_active && available >= item.quantity : false,

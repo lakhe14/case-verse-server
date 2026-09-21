@@ -26,6 +26,7 @@ function shapeVariant(variant) {
     id: variant.id,
     sku: variant.sku,
     price: Number(variant.price),
+    compare_at_price: variant.compare_at_price == null ? null : Number(variant.compare_at_price),
     stock_quantity: variant.stock_quantity,
     is_active: variant.is_active,
     in_stock: variant.stock_quantity > 0,
@@ -43,6 +44,7 @@ function shapeProduct(product, { publicOnly = true } = {}) {
     .filter((v) => (publicOnly ? v.is_active : true))
     .map(shapeVariant);
   const prices = variants.map((v) => v.price);
+  const comparePrices = variants.map((v) => v.compare_at_price).filter((price) => price != null);
   return {
     id: product.id,
     name: product.name,
@@ -55,6 +57,7 @@ function shapeProduct(product, { publicOnly = true } = {}) {
       : null,
     price_from: prices.length ? Math.min(...prices) : Number(product.base_price),
     price_to: prices.length ? Math.max(...prices) : Number(product.base_price),
+    compare_at_price_from: comparePrices.length ? Math.min(...comparePrices) : null,
     in_stock: variants.some((v) => v.in_stock),
     images: (product.images || [])
       .filter((i) => i.variant_id == null)

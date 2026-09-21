@@ -75,6 +75,7 @@ async function computeTotals({ userId, items, shippingAddress, couponCode, redee
       sku_snap: variant.sku,
       category_slug: variant.product?.category?.slug || null,
       unit_price: unitPrice,
+      compare_at_price: variant.compare_at_price == null ? null : Number(variant.compare_at_price),
       quantity: item.quantity,
       line_total: lineTotal,
     };
@@ -161,6 +162,7 @@ async function previewOrder(userId, { shipping_address_id, coupon_code, redeem_p
       name: l.product_name_snap,
       sku: l.sku_snap,
       unit_price: l.unit_price,
+      compare_at_price: l.compare_at_price,
       quantity: l.quantity,
       line_total: l.line_total,
     })),
@@ -312,7 +314,7 @@ const orderInclude = [
   { model: db.Address, as: 'shippingAddress' },
   { model: db.Address, as: 'billingAddress' },
   { model: db.Coupon, as: 'coupon' },
-  { model: db.OrderPaymentConfirmation, as: 'paymentConfirmation' },
+  { model: db.OrderPaymentConfirmation, as: 'paymentConfirmation', include: [{ model: db.Staff, as: 'reviewedByStaff', attributes: ['id', 'name'] }] },
 ];
 
 function shapeOrder(order) {
@@ -395,6 +397,28 @@ async function transitionOrderStatus(orderId, { status, note }, staffId, transac
         `Cannot move order from ${order.status} to ${status}`,
         'illegal_transition'
       );
+    }
+
+    // New checkout orders receive a payment-confirmation record. Fulfilment
+    // cannot progress until that record has been verified. Orders created
+    // before this feature intentionally have no record and retain their
+    // historical workflow rather than being retroactively blocked.
+    if (['processing', 'shipped', 'delivered'].includes(status)) {
+      const payment = await db.OrderPaymentConfirmation.findOne({
+        where: { order_id: order.id },
+        lock: t.LOCK.UPDATE,
+        transaction: t,
+      });
+      const confirmed = payment && (
+        (payment.method === 'advance_qr' && payment.status === 'approved') ||
+        (payment.method === 'whatsapp_cod' && payment.status === 'cod_confirmed')
+      );
+      if (payment && !confirmed) {
+        throw ApiError.forbidden(
+          'Payment confirmation must be approved before this order can be processed.',
+          'payment_confirmation_required'
+        );
+      }
     }
 
     // Restock on cancellation.
