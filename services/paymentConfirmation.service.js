@@ -9,7 +9,7 @@ const orderService = require('./order.service');
 const ApiError = require('../utils/ApiError');
 const { proofDir } = require('../middleware/paymentProofUpload');
 
-const includeOrder = [{ model: db.Order, as: 'order', include: [{ model: db.User, as: 'user', attributes: ['id', 'name', 'email'] }] }];
+const includeOrder = [{ model: db.Order, as: 'order', where: { status: 'pending' }, required: true, include: [{ model: db.User, as: 'user', attributes: ['id', 'name', 'email'] }] }];
 
 async function ownedConfirmation(userId, orderId, transaction) {
   const order = await db.Order.findOne({ where: { id: orderId, user_id: userId }, transaction });
@@ -59,6 +59,9 @@ async function review(id, action, staffId, note) {
   return db.sequelize.transaction(async (transaction) => {
     const confirmation = await db.OrderPaymentConfirmation.findByPk(id, { include: includeOrder, lock: transaction.LOCK.UPDATE, transaction });
     if (!confirmation) throw ApiError.notFound('Payment confirmation not found', 'payment_confirmation_not_found');
+    if (confirmation.order.status !== 'pending') {
+      throw ApiError.badRequest('Cancelled or fulfilled orders cannot be reviewed for payment.', 'payment_not_eligible');
+    }
     if (!['proof_uploaded', 'cod_pending'].includes(confirmation.status)) throw ApiError.badRequest('This payment confirmation has already been reviewed.', 'payment_already_reviewed');
     const isCod = confirmation.status === 'cod_pending';
     if (action === 'approve') {

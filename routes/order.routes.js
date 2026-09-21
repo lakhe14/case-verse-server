@@ -13,6 +13,7 @@ router.use(requireAuth, requireType('customer'));
 router.post('/preview', validate({ body: v.previewSchema }), ctrl.preview);
 router.post('/', validate({ body: v.placeOrderSchema }), ctrl.place);
 router.get('/', validate({ query: v.listOrdersQuery }), ctrl.listMine);
+router.post('/:id/cancel', validate({ params: idParam }), ctrl.cancelMine);
 router.get('/:id', validate({ params: idParam }), ctrl.getMine);
 
 module.exports = router;

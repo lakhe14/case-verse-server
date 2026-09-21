@@ -18,3 +18,7 @@ exports.listMine = asyncHandler(async (req, res) => {
 exports.getMine = asyncHandler(async (req, res) => {
   res.json({ data: await orders.getUserOrder(req.auth.id, req.params.id) });
 });
+
+exports.cancelMine = asyncHandler(async (req, res) => {
+  res.json({ data: await orders.cancelUserOrder(req.auth.id, req.params.id) });
+});

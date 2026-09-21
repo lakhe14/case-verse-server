@@ -349,6 +349,29 @@ async function getUserOrder(userId, orderId, transaction) {
   return shapeOrder(order);
 }
 
+/** Customer cancellation is intentionally restricted to unconfirmed pending orders. */
+async function cancelUserOrder(userId, orderId) {
+  return db.sequelize.transaction(async (transaction) => {
+    const order = await db.Order.findOne({
+      where: { id: orderId, user_id: userId },
+      lock: transaction.LOCK.UPDATE,
+      transaction,
+    });
+    if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
+    if (order.status !== 'pending') {
+      throw ApiError.badRequest('Only pending orders can be cancelled.', 'order_not_cancellable');
+    }
+    const payment = await db.OrderPaymentConfirmation.findOne({
+      where: { order_id: order.id }, lock: transaction.LOCK.UPDATE, transaction,
+    });
+    const cancellablePayment = !payment || ['pending', 'proof_uploaded', 'rejected', 'cod_pending'].includes(payment.status);
+    if (!cancellablePayment) {
+      throw ApiError.badRequest('This order can no longer be cancelled after payment confirmation.', 'order_not_cancellable');
+    }
+    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation' }, null, transaction);
+  });
+}
+
 /* ------------------------------- Admin ------------------------------- */
 
 async function adminListOrders({ page = 1, limit = 20, status, q } = {}) {
@@ -459,6 +482,7 @@ module.exports = {
   placeOrder,
   listUserOrders,
   getUserOrder,
+  cancelUserOrder,
   adminListOrders,
   adminGetOrder,
   transitionOrderStatus,
