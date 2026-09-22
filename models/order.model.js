@@ -19,6 +19,8 @@ module.exports = (sequelize) => {
       subtotal_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
       discount_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
       bundle_discount_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+      campaign_code: { type: DataTypes.STRING(40), allowNull: true },
+      campaign_name_snap: { type: DataTypes.STRING(150), allowNull: true },
       tax_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
       shipping_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
       total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
@@ -78,7 +80,31 @@ module.exports = (sequelize) => {
     method: { type: DataTypes.ENUM('advance_qr', 'whatsapp_cod'), allowNull: false }, advance_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 100 },
     status: { type: DataTypes.ENUM('pending', 'proof_uploaded', 'approved', 'rejected', 'cod_pending', 'cod_confirmed'), allowNull: false, defaultValue: 'pending' }, proof_filename: { type: DataTypes.STRING(255) }, admin_note: { type: DataTypes.STRING(500) }, reviewed_by_staff_id: { type: DataTypes.INTEGER }, reviewed_at: { type: DataTypes.DATE },
   }, { sequelize, modelName: 'OrderPaymentConfirmation', tableName: 'order_payment_confirmations', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
-  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation };
+
+  // Free promotional items (e.g. the Dashain suction holder) have no catalogue
+  // SKU, so they are snapshotted here rather than forced into order_items,
+  // which requires a real variant_id.
+  class OrderPromoItem extends Model {}
+  OrderPromoItem.init(
+    {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+      order_id: { type: DataTypes.INTEGER, allowNull: false },
+      sku_snap: { type: DataTypes.STRING(64), allowNull: false },
+      name_snap: { type: DataTypes.STRING(200), allowNull: false },
+      quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+      unit_price: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+    },
+    {
+      sequelize,
+      modelName: 'OrderPromoItem',
+      tableName: 'order_promo_items',
+      timestamps: true,
+      createdAt: 'created_at',
+      updatedAt: false,
+    }
+  );
+
+  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem };
 };
 
 module.exports.ORDER_STATUSES = ORDER_STATUSES;

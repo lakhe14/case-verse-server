@@ -91,6 +91,12 @@ async function computeTotals({ userId, items, shippingAddress, couponCode, redee
   let discount = 0;
   let coupon = null;
   if (couponCode) {
+    if (bundle.pairs > 0) {
+      throw ApiError.badRequest(
+        'Coupon codes cannot be combined with the Dashain offer.',
+        'coupon_not_combinable_with_campaign'
+      );
+    }
     // Coupon applies on top of the bundle price, not the pre-bundle subtotal.
     const res = await validateCoupon(
       { code: couponCode, userId, subtotal: subtotalAfterBundle },
@@ -128,6 +134,10 @@ async function computeTotals({ userId, items, shippingAddress, couponCode, redee
     subtotal,
     covers_qty: bundle.covers_qty,
     bundle_discount: bundleDiscount,
+    campaign_active: bundle.campaign_active,
+    campaign_code: bundle.campaign_code,
+    campaign_label: bundle.campaign_label,
+    free_items: bundle.free_items,
     coupon,
     coupon_discount: discount,
     points_redeemed: pointsToRedeem,
@@ -224,6 +234,8 @@ async function placeOrder(userId, payload) {
         subtotal_amount: totals.subtotal,
         discount_amount: totals.discount_amount,
         bundle_discount_amount: totals.bundle_discount,
+        campaign_code: totals.campaign_code,
+        campaign_name_snap: totals.campaign_label,
         tax_amount: totals.tax_amount,
         shipping_amount: totals.shipping_amount,
         total_amount: totals.total_amount,
@@ -252,6 +264,21 @@ async function placeOrder(userId, payload) {
       const variant = variantMap.get(line.variant_id);
       variant.stock_quantity -= line.quantity;
       await variant.save({ transaction: t });
+    }
+
+    // Snapshot free promotional items (e.g. the Dashain suction holder).
+    // These carry no catalogue SKU and never touch inventory.
+    if (totals.free_items.length) {
+      await db.OrderPromoItem.bulkCreate(
+        totals.free_items.map((item) => ({
+          order_id: order.id,
+          sku_snap: `PROMO-${item.type.toUpperCase()}`,
+          name_snap: item.name,
+          quantity: item.quantity,
+          unit_price: item.price,
+        })),
+        { transaction: t }
+      );
     }
 
     // Record coupon usage.
@@ -311,6 +338,7 @@ const orderInclude = [
     ],
   },
   { model: db.OrderStatusHistory, as: 'statusHistory', separate: true, order: [['changed_at', 'ASC']] },
+  { model: db.OrderPromoItem, as: 'promoItems' },
   { model: db.Address, as: 'shippingAddress' },
   { model: db.Address, as: 'billingAddress' },
   { model: db.Coupon, as: 'coupon' },

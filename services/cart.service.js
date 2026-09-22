@@ -67,7 +67,7 @@ async function shapeCart(cart, transaction) {
 
   const subtotal = Number(lines.reduce((sum, l) => sum + l.line_total, 0).toFixed(2));
 
-  // "Buy 2 iPhone Covers for 1199" — shown as its own line, not folded into the subtotal.
+  // Dashain campaign bundle — shown as its own line, not folded into the subtotal.
   const bundle = computeCoverBundle(lines);
 
   return {
@@ -76,6 +76,10 @@ async function shapeCart(cart, transaction) {
     subtotal,
     covers_qty: bundle.covers_qty,
     bundle_discount: bundle.discount,
+    campaign_active: bundle.campaign_active,
+    campaign_code: bundle.campaign_code,
+    campaign_label: bundle.campaign_label,
+    free_items: bundle.free_items,
     estimated_total: Number(Math.max(subtotal - bundle.discount, 0).toFixed(2)),
     item_count: lines.reduce((n, l) => n + l.quantity, 0),
     has_stock_issue: lines.some((l) => !l.stock_ok),

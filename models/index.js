@@ -17,7 +17,7 @@ const {
 } = require('./catalog.model')(sequelize);
 const { Cart, CartItem, Wishlist } = require('./cart.model')(sequelize);
 const { Coupon, CouponUsage } = require('./coupon.model')(sequelize);
-const { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation } = require('./order.model')(sequelize);
+const { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem } = require('./order.model')(sequelize);
 const Review = require('./review.model')(sequelize);
 const LoyaltyTransaction = require('./loyalty.model')(sequelize);
 const { ShippingRate, StoreSetting } = require('./settings.model')(sequelize);
@@ -114,6 +114,9 @@ Order.hasOne(OrderPaymentConfirmation, { foreignKey: 'order_id', as: 'paymentCon
 OrderPaymentConfirmation.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
 OrderPaymentConfirmation.belongsTo(Staff, { foreignKey: 'reviewed_by_staff_id', as: 'reviewedByStaff' });
 
+Order.hasMany(OrderPromoItem, { foreignKey: 'order_id', as: 'promoItems' });
+OrderPromoItem.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
+
 // Reviews
 Product.hasMany(Review, { foreignKey: 'product_id', as: 'reviews' });
 Review.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
@@ -151,6 +154,7 @@ const db = {
   OrderItem,
   OrderStatusHistory,
   OrderPaymentConfirmation,
+  OrderPromoItem,
   Review,
   LoyaltyTransaction,
   ShippingRate,
