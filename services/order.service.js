@@ -5,7 +5,7 @@ const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { generateOrderNumber } = require('../utils/orderNumber');
 const { validateCoupon } = require('./coupon.service');
-const { resolveShipping } = require('./settings.service');
+const parcelmoover = require('./parcelmoover.service');
 const { computeCoverBundle } = require('./bundle.service');
 const loyalty = require('./loyalty.service');
 const env = require('../config/env');
@@ -56,9 +56,18 @@ async function requireOwnedAddress(userId, addressId, transaction) {
  * items it wants directly. Every price and stock fact is still re-read from
  * the database here; nothing from the request body is trusted for pricing.
  */
+function normalizeGuestItems(items) {
+  // A guest can submit arbitrary JSON, including the same variant twice. Fold
+  // it before stock checks so two individually-valid lines cannot exceed stock.
+  const quantities = new Map();
+  for (const item of items) quantities.set(item.variant_id, (quantities.get(item.variant_id) || 0) + item.quantity);
+  return [...quantities].map(([variant_id, quantity]) => ({ variant_id, quantity }));
+}
+
 async function loadGuestLines(items, transaction) {
   if (!items || !items.length) throw ApiError.badRequest('Your order has no items', 'cart_empty');
-  const variantIds = items.map((i) => i.variant_id);
+  const normalizedItems = normalizeGuestItems(items);
+  const variantIds = normalizedItems.map((i) => i.variant_id);
   const variants = await db.ProductVariant.findAll({
     where: { id: { [Op.in]: variantIds } },
     include: [
@@ -67,7 +76,7 @@ async function loadGuestLines(items, transaction) {
     transaction,
   });
   const variantMap = new Map(variants.map((v) => [v.id, v]));
-  const resolvedItems = items.map((i) => {
+  const resolvedItems = normalizedItems.map((i) => {
     const variant = variantMap.get(i.variant_id);
     if (!variant) throw ApiError.badRequest('A product in your order is no longer available', 'variant_unavailable');
     return { variant_id: i.variant_id, quantity: i.quantity, variant };
@@ -75,16 +84,29 @@ async function loadGuestLines(items, transaction) {
   return { items: resolvedItems };
 }
 
-/** Duck-typed shipping address for a guest order — resolveShipping only reads city/state/country. */
+/** Duck-typed shipping address for ParcelMoover's delivery quote. */
 function guestShippingAddress(guest) {
   return { city: guest.municipality, state: guest.province, country: 'Nepal' };
+}
+
+function totalShippingWeightKg(items) {
+  const { defaultWeightKg } = parcelmoover.getConfiguration();
+  // No product/variant weight columns currently exist. The configured default
+  // is therefore a per-item weight, multiplied by quantity, never a package total.
+  return Number(items.reduce((total, item) => {
+    const configuredWeight = Number(item.variant?.weight_kg ?? item.variant?.product?.weight_kg);
+    const unitWeight = Number.isFinite(configuredWeight) && configuredWeight > 0
+      ? configuredWeight
+      : defaultWeightKg;
+    return total + unitWeight * item.quantity;
+  }, 0).toFixed(3));
 }
 
 /**
  * Compute the money breakdown for a set of cart items.
  * Pure-ish: reads coupon/shipping/tax config but writes nothing.
  */
-async function computeTotals({ userId, items, shippingAddress, couponCode, redeemPoints = 0 }, transaction) {
+async function computeTotals({ userId, items, shippingAddress, parcelmooverDestinationId, couponCode, redeemPoints = 0 }, transaction) {
   const lines = items.map((item) => {
     const variant = item.variant;
     if (!variant || !variant.is_active) {
@@ -149,12 +171,19 @@ async function computeTotals({ userId, items, shippingAddress, couponCode, redee
   const totalDiscount = Number((discount + pointsDiscount).toFixed(2));
   const discountedSubtotal = Number(Math.max(subtotalAfterBundle - totalDiscount, 0).toFixed(2));
 
-  // No address yet (an early guest cart-stage preview) — don't guess a
-  // shipping zone; leave it unresolved rather than silently defaulting to
-  // whichever rate happens to be first.
-  const { cost: shippingAmount, rate: shippingRate } = shippingAddress
-    ? await resolveShipping({ address: shippingAddress, subtotal })
-    : { cost: 0, rate: null };
+  // No address yet (an early guest cart-stage preview) leaves delivery
+  // unresolved. With an address, a failed/unconfigured carrier is an error;
+  // never substitute a local or zero-cost delivery fallback.
+  let shippingAmount = 0;
+  let shippingRate = null;
+  if (shippingAddress) {
+    const quote = await parcelmoover.quote({
+      destinationId: parcelmooverDestinationId,
+      weightKg: totalShippingWeightKg(items),
+    });
+    shippingAmount = quote.amount;
+    shippingRate = quote;
+  }
 
   // No sales tax is charged on orders.
   const taxAmount = 0;
@@ -179,16 +208,19 @@ async function computeTotals({ userId, items, shippingAddress, couponCode, redee
     shipping_rate: shippingRate,
     tax_amount: taxAmount,
     total_amount: total,
+    advance_amount: env.payment.advanceAmount,
+    remaining_due: Number(Math.max(total - env.payment.advanceAmount, 0).toFixed(2)),
   };
 }
 
-async function previewOrder(userId, { shipping_address_id, coupon_code, redeem_points }) {
+async function previewOrder(userId, { shipping_address_id, parcelmoover_destination_id, coupon_code, redeem_points }) {
   const { items } = await loadCartLines(userId);
   const shippingAddress = await requireOwnedAddress(userId, shipping_address_id);
   const totals = await computeTotals({
     userId,
     items,
     shippingAddress,
+    parcelmooverDestinationId: parcelmoover_destination_id,
     couponCode: coupon_code,
     redeemPoints: redeem_points || 0,
   });
@@ -196,9 +228,14 @@ async function previewOrder(userId, { shipping_address_id, coupon_code, redeem_p
   return {
     ...rest,
     coupon: coupon ? { code: coupon.code, description: coupon.description } : null,
-    shipping_method: shipping_rate
-      ? `${shipping_rate.method_name} shipping to ${shipping_rate.zone_name}`
-      : null,
+    shipping_method: shipping_rate ? shipping_rate.service_type : null,
+    courier: shipping_rate ? {
+      provider: 'parcelmoover', destination_id: shipping_rate.destination.id,
+      destination_name: shipping_rate.destination.name, service_type: shipping_rate.service_type,
+      weight_kg: shipping_rate.weight_kg, base_charge: shipping_rate.base_charge,
+      weight_surcharge: shipping_rate.weight_surcharge, rate_type: shipping_rate.rate_type,
+      basis: shipping_rate.basis, valley: shipping_rate.valley,
+    } : null,
     lines: lines.map((l) => ({
       variant_id: l.variant_id,
       name: l.product_name_snap,
@@ -298,7 +335,7 @@ async function lockVariantsForItems(items, transaction) {
 }
 
 async function placeOrder(userId, payload) {
-  const { shipping_address_id, billing_address_id, coupon_code, redeem_points } = payload;
+  const { shipping_address_id, billing_address_id, parcelmoover_destination_id, coupon_code, redeem_points } = payload;
 
   return db.sequelize.transaction(async (t) => {
     const { cart, items } = await loadCartLines(userId, t);
@@ -315,6 +352,7 @@ async function placeOrder(userId, payload) {
         userId,
         items,
         shippingAddress,
+        parcelmooverDestinationId: parcelmoover_destination_id,
         couponCode: coupon_code,
         redeemPoints: redeem_points || 0,
       },
@@ -333,6 +371,16 @@ async function placeOrder(userId, payload) {
         campaign_name_snap: totals.campaign_label,
         tax_amount: totals.tax_amount,
         shipping_amount: totals.shipping_amount,
+        courier_provider: 'parcelmoover',
+        courier_destination_id: totals.shipping_rate.destination.id,
+        courier_destination_name: totals.shipping_rate.destination.name,
+        courier_service_type: totals.shipping_rate.service_type,
+        courier_weight_kg: totals.shipping_rate.weight_kg,
+        courier_base_charge: totals.shipping_rate.base_charge,
+        courier_weight_surcharge: totals.shipping_rate.weight_surcharge,
+        courier_delivery_charge: totals.shipping_amount,
+        courier_rate_basis: totals.shipping_rate.basis,
+        courier_valley: totals.shipping_rate.valley,
         total_amount: totals.total_amount,
         coupon_id: totals.coupon ? totals.coupon.id : null,
         shipping_address_id: shippingAddress.id,
@@ -459,14 +507,19 @@ async function previewGuestOrder({ items, guest, coupon_code }) {
   }
   const { items: lines } = await loadGuestLines(items);
   const shippingAddress = guest?.municipality ? guestShippingAddress(guest) : undefined;
-  const totals = await computeTotals({ userId: null, items: lines, shippingAddress, couponCode: undefined, redeemPoints: 0 });
+  const totals = await computeTotals({ userId: null, items: lines, shippingAddress, parcelmooverDestinationId: guest?.parcelmoover_destination_id, couponCode: undefined, redeemPoints: 0 });
   const { lines: totalsLines, coupon, shipping_rate, ...rest } = totals;
   return {
     ...rest,
     coupon: null,
-    shipping_method: shipping_rate
-      ? `${shipping_rate.method_name} shipping to ${shipping_rate.zone_name}`
-      : null,
+    shipping_method: shipping_rate ? shipping_rate.service_type : null,
+    courier: shipping_rate ? {
+      provider: 'parcelmoover', destination_id: shipping_rate.destination.id,
+      destination_name: shipping_rate.destination.name, service_type: shipping_rate.service_type,
+      weight_kg: shipping_rate.weight_kg, base_charge: shipping_rate.base_charge,
+      weight_surcharge: shipping_rate.weight_surcharge, rate_type: shipping_rate.rate_type,
+      basis: shipping_rate.basis, valley: shipping_rate.valley,
+    } : null,
     lines: totalsLines.map((l) => ({
       variant_id: l.variant_id,
       name: l.product_name_snap,
@@ -493,7 +546,7 @@ async function placeGuestOrder({ items, guest }) {
     const variantMap = await lockVariantsForItems(lines, t);
 
     const totals = await computeTotals(
-      { userId: null, items: lines, shippingAddress, couponCode: undefined, redeemPoints: 0 },
+      { userId: null, items: lines, shippingAddress, parcelmooverDestinationId: guest.parcelmoover_destination_id, couponCode: undefined, redeemPoints: 0 },
       t
     );
 
@@ -519,6 +572,16 @@ async function placeGuestOrder({ items, guest }) {
         campaign_name_snap: totals.campaign_label,
         tax_amount: totals.tax_amount,
         shipping_amount: totals.shipping_amount,
+        courier_provider: 'parcelmoover',
+        courier_destination_id: totals.shipping_rate.destination.id,
+        courier_destination_name: totals.shipping_rate.destination.name,
+        courier_service_type: totals.shipping_rate.service_type,
+        courier_weight_kg: totals.shipping_rate.weight_kg,
+        courier_base_charge: totals.shipping_rate.base_charge,
+        courier_weight_surcharge: totals.shipping_rate.weight_surcharge,
+        courier_delivery_charge: totals.shipping_amount,
+        courier_rate_basis: totals.shipping_rate.basis,
+        courier_valley: totals.shipping_rate.valley,
         total_amount: totals.total_amount,
         coupon_id: null,
         shipping_address_id: null,
@@ -672,6 +735,7 @@ async function updateOrderStatus(orderId, payload, staffId) {
 
 module.exports = {
   STATUS_FLOW,
+  normalizeGuestItems,
   computeTotals,
   previewOrder,
   placeOrder,

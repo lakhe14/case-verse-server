@@ -1,6 +1,7 @@
 'use strict';
 
 const asyncHandler = require('../utils/asyncHandler');
+const fs = require('fs');
 const orders = require('../services/order.service');
 const payments = require('../services/paymentConfirmation.service');
 
@@ -23,7 +24,13 @@ exports.cancel = asyncHandler(async (req, res) => {
 });
 
 exports.uploadProof = asyncHandler(async (req, res) => {
-  res.json({ data: await payments.uploadProofGuest(req.params.token, req.file) });
+  try {
+    res.json({ data: await payments.uploadProofGuest(req.params.token, req.file) });
+  } catch (error) {
+    // Multer writes before token ownership is checked; remove rejected files.
+    if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {});
+    throw error;
+  }
 });
 
 exports.requestCod = asyncHandler(async (req, res) => {

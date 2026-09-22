@@ -2,6 +2,7 @@
 
 const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
 const { nepaliPhone } = require('../validators/common');
+const { normalizeGuestItems } = require('../services/order.service');
 
 describe('guest order access token', () => {
   it('is high entropy and hashes deterministically', () => {
@@ -34,5 +35,13 @@ describe('Nepal-friendly phone validation', () => {
 
   it.each(invalid)('rejects %s', (phone) => {
     expect(() => nepaliPhone.parse(phone)).toThrow();
+  });
+});
+
+describe('Guest checkout input normalization', () => {
+  it('merges duplicate variants before stock is checked', () => {
+    expect(normalizeGuestItems([
+      { variant_id: 42, quantity: 4 }, { variant_id: 42, quantity: 4 }, { variant_id: 8, quantity: 1 },
+    ])).toEqual([{ variant_id: 42, quantity: 8 }, { variant_id: 8, quantity: 1 }]);
   });
 });

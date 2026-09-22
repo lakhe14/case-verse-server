@@ -14,6 +14,7 @@ router.use('/attributes', require('./attribute.routes'));
 router.use('/products', require('./product.routes'));
 router.use('/cart', require('./cart.routes'));
 router.use('/campaign', require('./campaign.routes'));
+router.use('/shipping', require('./shipping.routes'));
 router.use('/wishlist', require('./wishlist.routes'));
 router.use('/coupons', require('./coupon.routes'));
 router.use('/orders', require('./order.routes'));

@@ -20,6 +20,7 @@ const guestInfoSchema = z.object({
   notes: z.string().trim().max(500).optional(),
   latitude: z.coerce.number().min(-90).max(90).optional(),
   longitude: z.coerce.number().min(-180).max(180).optional(),
+  parcelmoover_destination_id: z.string().trim().min(1).max(100),
 });
 
 const guestPreviewSchema = z.object({
@@ -40,12 +41,14 @@ const guestTokenParam = z.object({ token: z.string().trim().min(20).max(200) });
 
 const previewSchema = z.object({
   shipping_address_id: id,
+  parcelmoover_destination_id: z.string().trim().min(1).max(100),
   coupon_code: z.string().trim().max(40).optional(),
   redeem_points: z.coerce.number().int().min(0).default(0),
 });
 
 const placeOrderSchema = z.object({
   shipping_address_id: id,
+  parcelmoover_destination_id: z.string().trim().min(1).max(100),
   // Optional: billing defaults to the shipping address when omitted.
   billing_address_id: id.optional(),
   coupon_code: z.string().trim().max(40).optional(),
