@@ -20,7 +20,13 @@ function required(key, fallback) {
  * A URL wins when present.
  */
 function resolveDbConfig() {
-  const url = process.env.DATABASE_URL;
+  const isTest = process.env.NODE_ENV === 'test';
+  // Integration tests must opt into a dedicated test database. Never inherit
+  // DATABASE_URL/DB_NAME from development when NODE_ENV=test.
+  if (isTest && !process.env.DB_TEST_NAME) {
+    throw new Error('NODE_ENV=test requires DB_TEST_NAME (a dedicated test database)');
+  }
+  const url = isTest ? process.env.DB_TEST_URL : process.env.DATABASE_URL;
   let host, port, name, user, password;
   let sslFromUrl = false;
 
@@ -34,12 +40,14 @@ function resolveDbConfig() {
     const sslMode = (u.searchParams.get('ssl-mode') || u.searchParams.get('sslmode') || '').toUpperCase();
     sslFromUrl = ['REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY', 'TRUE', '1'].includes(sslMode);
   } else {
-    host = required('DB_HOST', '127.0.0.1');
-    port = parseInt(process.env.DB_PORT || '3306', 10);
-    name = required('DB_NAME', 'caseverse');
-    user = required('DB_USER', 'root');
-    password = process.env.DB_PASSWORD || '';
+    host = isTest ? required('DB_TEST_HOST', '127.0.0.1') : required('DB_HOST', '127.0.0.1');
+    port = parseInt((isTest ? process.env.DB_TEST_PORT : process.env.DB_PORT) || '3306', 10);
+    name = isTest ? required('DB_TEST_NAME') : required('DB_NAME', 'caseverse');
+    user = isTest ? required('DB_TEST_USER', 'root') : required('DB_USER', 'root');
+    password = isTest ? (process.env.DB_TEST_PASSWORD || '') : (process.env.DB_PASSWORD || '');
   }
+
+  if (isTest && !/test/i.test(name)) throw new Error('Refusing test database configuration without "test" in its name');
 
   // SSL: on if the URL asked for it, or DB_SSL=true, or the host looks managed.
   const sslEnv = (process.env.DB_SSL || '').toLowerCase();

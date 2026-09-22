@@ -14,7 +14,8 @@
     "db:reset": "node scripts/initDb.js --drop && node scripts/seed.js",
     "db:remove-legacy-bags": "node scripts/removeLegacyBags.js",
     "dev:reset-accounts": "node scripts/resetDevAccounts.js",
-    "test": "jest --runInBand"
+    "test": "set NODE_ENV=test&& set DB_TEST_NAME=caseverse_unit_test&& jest --runInBand",
+    "test:integration": "set NODE_ENV=test&& jest --runInBand tests/integration --passWithNoTests"
   },
   "keywords": [
     "ecommerce",
