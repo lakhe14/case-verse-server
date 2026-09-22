@@ -15,7 +15,7 @@ const errorHandler = require('./middleware/errorHandler');
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet());
+app.use(helmet({ referrerPolicy: { policy: 'same-origin' } }));
 app.use(
   cors({
     origin: env.clientOrigin.split(',').map((s) => s.trim()),
@@ -25,7 +25,9 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-if (!env.isTest) app.use(morgan(env.isProd ? 'combined' : 'dev'));
+// Guest access tokens live in URL paths by design. Never write them to logs.
+const redactGuestTokenPath = (url = '') => url.replace(/(\/api\/guest-checkout\/orders\/)[^/?]+/g, '$1<redacted>');
+if (!env.isTest) app.use(morgan((tokens, req, res) => [tokens.method(req, res), redactGuestTokenPath(req.originalUrl), tokens.status(req, res), `${tokens['response-time'](req, res)} ms`].join(' ')));
 
 // Broad limiter for the whole API; credential routes add their own tighter one.
 app.use(
