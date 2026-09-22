@@ -9,6 +9,7 @@ const { resolveShipping } = require('./settings.service');
 const { computeCoverBundle } = require('./bundle.service');
 const loyalty = require('./loyalty.service');
 const env = require('../config/env');
+const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
 
 const { ORDER_STATUSES } = require('../models/order.model');
 
@@ -48,6 +49,35 @@ async function requireOwnedAddress(userId, addressId, transaction) {
   });
   if (!address) throw ApiError.badRequest('Address not found', 'address_not_found');
   return address;
+}
+
+/**
+ * Guest checkout has no server-side cart — the client submits the line
+ * items it wants directly. Every price and stock fact is still re-read from
+ * the database here; nothing from the request body is trusted for pricing.
+ */
+async function loadGuestLines(items, transaction) {
+  if (!items || !items.length) throw ApiError.badRequest('Your order has no items', 'cart_empty');
+  const variantIds = items.map((i) => i.variant_id);
+  const variants = await db.ProductVariant.findAll({
+    where: { id: { [Op.in]: variantIds } },
+    include: [
+      { model: db.Product, as: 'product', include: [{ model: db.Category, as: 'category' }] },
+    ],
+    transaction,
+  });
+  const variantMap = new Map(variants.map((v) => [v.id, v]));
+  const resolvedItems = items.map((i) => {
+    const variant = variantMap.get(i.variant_id);
+    if (!variant) throw ApiError.badRequest('A product in your order is no longer available', 'variant_unavailable');
+    return { variant_id: i.variant_id, quantity: i.quantity, variant };
+  });
+  return { items: resolvedItems };
+}
+
+/** Duck-typed shipping address for a guest order — resolveShipping only reads city/state/country. */
+function guestShippingAddress(guest) {
+  return { city: guest.municipality, state: guest.province, country: 'Nepal' };
 }
 
 /**
@@ -119,10 +149,12 @@ async function computeTotals({ userId, items, shippingAddress, couponCode, redee
   const totalDiscount = Number((discount + pointsDiscount).toFixed(2));
   const discountedSubtotal = Number(Math.max(subtotalAfterBundle - totalDiscount, 0).toFixed(2));
 
-  const { cost: shippingAmount, rate: shippingRate } = await resolveShipping({
-    address: shippingAddress,
-    subtotal,
-  });
+  // No address yet (an early guest cart-stage preview) — don't guess a
+  // shipping zone; leave it unresolved rather than silently defaulting to
+  // whichever rate happens to be first.
+  const { cost: shippingAmount, rate: shippingRate } = shippingAddress
+    ? await resolveShipping({ address: shippingAddress, subtotal })
+    : { cost: 0, rate: null };
 
   // No sales tax is charged on orders.
   const taxAmount = 0;
@@ -179,6 +211,92 @@ async function previewOrder(userId, { shipping_address_id, coupon_code, redeem_p
   };
 }
 
+/**
+ * Shared order-creation tail used by both the authenticated and guest
+ * placement paths — the ONE place that writes order items, decrements
+ * stock, snapshots free promo items, opens status history, and creates the
+ * payment confirmation row. `orderAttrs` differs (user_id + addresses vs.
+ * guest_* fields), everything after that is identical.
+ */
+async function createOrderAndSideEffects({ orderAttrs, totals, variantMap, transaction: t }) {
+  const order = await db.Order.create(orderAttrs, { transaction: t });
+
+  await db.OrderItem.bulkCreate(
+    totals.lines.map((l) => ({
+      order_id: order.id,
+      variant_id: l.variant_id,
+      product_name_snap: l.product_name_snap,
+      sku_snap: l.sku_snap,
+      unit_price: l.unit_price,
+      quantity: l.quantity,
+      line_total: l.line_total,
+    })),
+    { transaction: t }
+  );
+
+  // Decrement stock.
+  for (const line of totals.lines) {
+    const variant = variantMap.get(line.variant_id);
+    variant.stock_quantity -= line.quantity;
+    await variant.save({ transaction: t });
+  }
+
+  // Snapshot free promotional items (e.g. the Dashain suction holder).
+  // These carry no catalogue SKU and never touch inventory.
+  if (totals.free_items.length) {
+    await db.OrderPromoItem.bulkCreate(
+      totals.free_items.map((item) => ({
+        order_id: order.id,
+        sku_snap: `PROMO-${item.type.toUpperCase()}`,
+        name_snap: item.name,
+        quantity: item.quantity,
+        unit_price: item.price,
+      })),
+      { transaction: t }
+    );
+  }
+
+  await db.OrderStatusHistory.create(
+    { order_id: order.id, status: 'pending', note: orderAttrs.user_id ? 'Order placed' : 'Order placed (guest)' },
+    { transaction: t }
+  );
+
+  await db.OrderPaymentConfirmation.create(
+    { order_id: order.id, method: 'advance_qr', advance_amount: env.payment.advanceAmount, status: 'pending' },
+    { transaction: t }
+  );
+
+  return order;
+}
+
+/** Re-lock variants and re-check stock inside a transaction; mutates each item's `.variant` in place. */
+async function lockVariantsForItems(items, transaction) {
+  const variantIds = items.map((i) => i.variant_id);
+  const variants = await db.ProductVariant.findAll({
+    where: { id: { [Op.in]: variantIds } },
+    lock: transaction.LOCK.UPDATE,
+    transaction,
+  });
+  const variantMap = new Map(variants.map((v) => [v.id, v]));
+  for (const item of items) {
+    const lockedVariant = variantMap.get(item.variant_id);
+    if (lockedVariant) {
+      // Keep the product+category eager-loaded by the caller (needed for the
+      // name snapshot and the cover-bundle category check); only the locked
+      // stock/price fields matter from the re-read.
+      lockedVariant.product = item.variant?.product || null;
+      item.variant = lockedVariant;
+    }
+    if (item.variant && !item.variant.product) {
+      item.variant.product = await db.Product.findByPk(item.variant.product_id, {
+        include: [{ model: db.Category, as: 'category' }],
+        transaction,
+      });
+    }
+  }
+  return variantMap;
+}
+
 async function placeOrder(userId, payload) {
   const { shipping_address_id, billing_address_id, coupon_code, redeem_points } = payload;
 
@@ -190,30 +308,7 @@ async function placeOrder(userId, payload) {
       ? await requireOwnedAddress(userId, billing_address_id, t)
       : shippingAddress;
 
-    // Re-lock variants and re-check stock inside the transaction.
-    const variantIds = items.map((i) => i.variant_id);
-    const variants = await db.ProductVariant.findAll({
-      where: { id: { [Op.in]: variantIds } },
-      lock: t.LOCK.UPDATE,
-      transaction: t,
-    });
-    const variantMap = new Map(variants.map((v) => [v.id, v]));
-    for (const item of items) {
-      const lockedVariant = variantMap.get(item.variant_id);
-      if (lockedVariant) {
-        // Keep the product+category eager-loaded by loadCartLines (needed for the
-        // name snapshot and the cover-bundle category check); only the locked
-        // stock/price fields matter from the re-read.
-        lockedVariant.product = item.variant?.product || null;
-        item.variant = lockedVariant;
-      }
-      if (item.variant && !item.variant.product) {
-        item.variant.product = await db.Product.findByPk(item.variant.product_id, {
-          include: [{ model: db.Category, as: 'category' }],
-          transaction: t,
-        });
-      }
-    }
+    const variantMap = await lockVariantsForItems(items, t);
 
     const totals = await computeTotals(
       {
@@ -226,8 +321,8 @@ async function placeOrder(userId, payload) {
       t
     );
 
-    const order = await db.Order.create(
-      {
+    const order = await createOrderAndSideEffects({
+      orderAttrs: {
         order_number: generateOrderNumber(),
         user_id: userId,
         status: 'pending',
@@ -243,43 +338,10 @@ async function placeOrder(userId, payload) {
         shipping_address_id: shippingAddress.id,
         billing_address_id: billingAddress.id,
       },
-      { transaction: t }
-    );
-
-    await db.OrderItem.bulkCreate(
-      totals.lines.map((l) => ({
-        order_id: order.id,
-        variant_id: l.variant_id,
-        product_name_snap: l.product_name_snap,
-        sku_snap: l.sku_snap,
-        unit_price: l.unit_price,
-        quantity: l.quantity,
-        line_total: l.line_total,
-      })),
-      { transaction: t }
-    );
-
-    // Decrement stock.
-    for (const line of totals.lines) {
-      const variant = variantMap.get(line.variant_id);
-      variant.stock_quantity -= line.quantity;
-      await variant.save({ transaction: t });
-    }
-
-    // Snapshot free promotional items (e.g. the Dashain suction holder).
-    // These carry no catalogue SKU and never touch inventory.
-    if (totals.free_items.length) {
-      await db.OrderPromoItem.bulkCreate(
-        totals.free_items.map((item) => ({
-          order_id: order.id,
-          sku_snap: `PROMO-${item.type.toUpperCase()}`,
-          name_snap: item.name,
-          quantity: item.quantity,
-          unit_price: item.price,
-        })),
-        { transaction: t }
-      );
-    }
+      totals,
+      variantMap,
+      transaction: t,
+    });
 
     // Record coupon usage.
     if (totals.coupon) {
@@ -301,22 +363,6 @@ async function placeOrder(userId, payload) {
         t
       );
     }
-
-    // Initial status history row.
-    await db.OrderStatusHistory.create(
-      { order_id: order.id, status: 'pending', note: 'Order placed' },
-      { transaction: t }
-    );
-
-    await db.OrderPaymentConfirmation.create(
-      {
-        order_id: order.id,
-        method: 'advance_qr',
-        advance_amount: env.payment.advanceAmount,
-        status: 'pending',
-      },
-      { transaction: t }
-    );
 
     // Empty the cart.
     await db.CartItem.destroy({ where: { cart_id: cart.id }, transaction: t });
@@ -377,6 +423,20 @@ async function getUserOrder(userId, orderId, transaction) {
   return shapeOrder(order);
 }
 
+/** Shared pending/payment-state eligibility check for customer and guest self-cancellation. */
+async function assertSelfCancellable(order, transaction) {
+  if (order.status !== 'pending') {
+    throw ApiError.badRequest('Only pending orders can be cancelled.', 'order_not_cancellable');
+  }
+  const payment = await db.OrderPaymentConfirmation.findOne({
+    where: { order_id: order.id }, lock: transaction.LOCK.UPDATE, transaction,
+  });
+  const cancellablePayment = !payment || ['pending', 'proof_uploaded', 'rejected', 'cod_pending'].includes(payment.status);
+  if (!cancellablePayment) {
+    throw ApiError.badRequest('This order can no longer be cancelled after payment confirmation.', 'order_not_cancellable');
+  }
+}
+
 /** Customer cancellation is intentionally restricted to unconfirmed pending orders. */
 async function cancelUserOrder(userId, orderId) {
   return db.sequelize.transaction(async (transaction) => {
@@ -386,17 +446,123 @@ async function cancelUserOrder(userId, orderId) {
       transaction,
     });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-    if (order.status !== 'pending') {
-      throw ApiError.badRequest('Only pending orders can be cancelled.', 'order_not_cancellable');
-    }
-    const payment = await db.OrderPaymentConfirmation.findOne({
-      where: { order_id: order.id }, lock: transaction.LOCK.UPDATE, transaction,
-    });
-    const cancellablePayment = !payment || ['pending', 'proof_uploaded', 'rejected', 'cod_pending'].includes(payment.status);
-    if (!cancellablePayment) {
-      throw ApiError.badRequest('This order can no longer be cancelled after payment confirmation.', 'order_not_cancellable');
-    }
+    await assertSelfCancellable(order, transaction);
     return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation' }, null, transaction);
+  });
+}
+
+/* ---------------------------- Guest checkout --------------------------- */
+
+async function previewGuestOrder({ items, guest, coupon_code }) {
+  if (coupon_code) {
+    throw ApiError.badRequest('Coupon codes require an account. Sign in to use one.', 'coupon_requires_account');
+  }
+  const { items: lines } = await loadGuestLines(items);
+  const shippingAddress = guest?.municipality ? guestShippingAddress(guest) : undefined;
+  const totals = await computeTotals({ userId: null, items: lines, shippingAddress, couponCode: undefined, redeemPoints: 0 });
+  const { lines: totalsLines, coupon, shipping_rate, ...rest } = totals;
+  return {
+    ...rest,
+    coupon: null,
+    shipping_method: shipping_rate
+      ? `${shipping_rate.method_name} shipping to ${shipping_rate.zone_name}`
+      : null,
+    lines: totalsLines.map((l) => ({
+      variant_id: l.variant_id,
+      name: l.product_name_snap,
+      sku: l.sku_snap,
+      unit_price: l.unit_price,
+      compare_at_price: l.compare_at_price,
+      quantity: l.quantity,
+      line_total: l.line_total,
+    })),
+  };
+}
+
+/** Resolve a raw guest token to its order id via the stored hash. Returns null, never throws, for an unknown token. */
+async function resolveGuestToken(token, transaction) {
+  const tokenHash = hashOpaqueToken(token);
+  const record = await db.GuestOrderToken.findOne({ where: { token_hash: tokenHash }, transaction });
+  return record ? record.order_id : null;
+}
+
+async function placeGuestOrder({ items, guest }) {
+  return db.sequelize.transaction(async (t) => {
+    const { items: lines } = await loadGuestLines(items, t);
+    const shippingAddress = guestShippingAddress(guest);
+    const variantMap = await lockVariantsForItems(lines, t);
+
+    const totals = await computeTotals(
+      { userId: null, items: lines, shippingAddress, couponCode: undefined, redeemPoints: 0 },
+      t
+    );
+
+    const order = await createOrderAndSideEffects({
+      orderAttrs: {
+        order_number: generateOrderNumber(),
+        user_id: null,
+        guest_name: guest.name,
+        guest_phone: guest.phone,
+        guest_province: guest.province,
+        guest_district: guest.district,
+        guest_municipality: guest.municipality,
+        guest_area: guest.area,
+        guest_landmark: guest.landmark || null,
+        guest_delivery_notes: guest.notes || null,
+        guest_latitude: guest.latitude ?? null,
+        guest_longitude: guest.longitude ?? null,
+        status: 'pending',
+        subtotal_amount: totals.subtotal,
+        discount_amount: totals.discount_amount,
+        bundle_discount_amount: totals.bundle_discount,
+        campaign_code: totals.campaign_code,
+        campaign_name_snap: totals.campaign_label,
+        tax_amount: totals.tax_amount,
+        shipping_amount: totals.shipping_amount,
+        total_amount: totals.total_amount,
+        coupon_id: null,
+        shipping_address_id: null,
+        billing_address_id: null,
+      },
+      totals,
+      variantMap,
+      transaction: t,
+    });
+
+    // High-entropy random token; only its sha256 hash is ever stored.
+    const { raw, hash } = generateOpaqueToken();
+    await db.GuestOrderToken.create({ order_id: order.id, token_hash: hash }, { transaction: t });
+
+    const shaped = await db.Order.findOne({ where: { id: order.id }, include: orderInclude, transaction: t });
+    return { order: shapeOrder(shaped), guest_token: raw };
+  });
+}
+
+/** Loads a guest order by its raw access token. Never reveals whether an unknown token differs from a customer's order — both are 404. */
+async function getGuestOrder(token, transaction) {
+  const orderId = await resolveGuestToken(token, transaction);
+  if (!orderId) throw ApiError.notFound('Order not found', 'order_not_found');
+  const order = await db.Order.findOne({
+    where: { id: orderId, user_id: null },
+    include: orderInclude,
+    transaction,
+  });
+  if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
+  return shapeOrder(order);
+}
+
+async function cancelGuestOrder(token) {
+  return db.sequelize.transaction(async (transaction) => {
+    const orderId = await resolveGuestToken(token, transaction);
+    if (!orderId) throw ApiError.notFound('Order not found', 'order_not_found');
+    const order = await db.Order.findOne({
+      where: { id: orderId, user_id: null },
+      lock: transaction.LOCK.UPDATE,
+      transaction,
+    });
+    if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
+    await assertSelfCancellable(order, transaction);
+    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by guest before payment confirmation' }, null, transaction);
   });
 }
 
@@ -489,8 +655,9 @@ async function transitionOrderStatus(orderId, { status, note }, staffId, transac
       { transaction: t }
     );
 
-    // Award loyalty points once delivered.
-    if (status === 'delivered') {
+    // Award loyalty points once delivered. Guest orders have no account to
+    // credit — loyalty_transactions.user_id is NOT NULL, so this must skip them.
+    if (status === 'delivered' && order.user_id) {
       await loyalty.awardForDeliveredOrder(order, t);
     }
 
@@ -511,6 +678,10 @@ module.exports = {
   listUserOrders,
   getUserOrder,
   cancelUserOrder,
+  previewGuestOrder,
+  placeGuestOrder,
+  getGuestOrder,
+  cancelGuestOrder,
   adminListOrders,
   adminGetOrder,
   transitionOrderStatus,

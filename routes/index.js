@@ -18,6 +18,7 @@ router.use('/wishlist', require('./wishlist.routes'));
 router.use('/coupons', require('./coupon.routes'));
 router.use('/orders', require('./order.routes'));
 router.use('/orders', require('./paymentConfirmation.routes'));
+router.use('/guest-checkout', require('./guestCheckout.routes'));
 router.use('/reviews', require('./review.routes'));
 router.use('/loyalty', require('./loyalty.routes'));
 router.use('/admin', require('./admin/index'));

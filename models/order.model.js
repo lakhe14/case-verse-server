@@ -10,7 +10,17 @@ module.exports = (sequelize) => {
     {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
       order_number: { type: DataTypes.STRING(30), allowNull: false, unique: true },
-      user_id: { type: DataTypes.INTEGER, allowNull: false },
+      user_id: { type: DataTypes.INTEGER, allowNull: true },
+      guest_name: { type: DataTypes.STRING(120), allowNull: true },
+      guest_phone: { type: DataTypes.STRING(20), allowNull: true },
+      guest_province: { type: DataTypes.STRING(100), allowNull: true },
+      guest_district: { type: DataTypes.STRING(100), allowNull: true },
+      guest_municipality: { type: DataTypes.STRING(150), allowNull: true },
+      guest_area: { type: DataTypes.STRING(255), allowNull: true },
+      guest_landmark: { type: DataTypes.STRING(255), allowNull: true },
+      guest_delivery_notes: { type: DataTypes.STRING(500), allowNull: true },
+      guest_latitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
+      guest_longitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
       status: {
         type: DataTypes.ENUM(...ORDER_STATUSES),
         allowNull: false,
@@ -25,8 +35,8 @@ module.exports = (sequelize) => {
       shipping_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
       total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
       coupon_id: { type: DataTypes.INTEGER, allowNull: true },
-      shipping_address_id: { type: DataTypes.INTEGER, allowNull: false },
-      billing_address_id: { type: DataTypes.INTEGER, allowNull: false },
+      shipping_address_id: { type: DataTypes.INTEGER, allowNull: true },
+      billing_address_id: { type: DataTypes.INTEGER, allowNull: true },
       placed_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },
     {
@@ -104,7 +114,26 @@ module.exports = (sequelize) => {
     }
   );
 
-  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem };
+  // Secure guest order access. Only the token's sha256 hash lives here — the
+  // raw token is returned once, at order creation, and never stored or logged.
+  class GuestOrderToken extends Model {}
+  GuestOrderToken.init(
+    {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+      order_id: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+      token_hash: { type: DataTypes.STRING(255), allowNull: false, unique: true },
+    },
+    {
+      sequelize,
+      modelName: 'GuestOrderToken',
+      tableName: 'guest_order_tokens',
+      timestamps: true,
+      createdAt: 'created_at',
+      updatedAt: false,
+    }
+  );
+
+  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken };
 };
 
 module.exports.ORDER_STATUSES = ORDER_STATUSES;

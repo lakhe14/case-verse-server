@@ -8,12 +8,27 @@ const env = require('../config/env');
 const orderService = require('./order.service');
 const ApiError = require('../utils/ApiError');
 const { proofDir } = require('../middleware/paymentProofUpload');
+const { hashOpaqueToken } = require('../utils/tokens');
 
 const includeOrder = [{ model: db.Order, as: 'order', where: { status: 'pending' }, required: true, include: [{ model: db.User, as: 'user', attributes: ['id', 'name', 'email'] }] }];
 
 async function ownedConfirmation(userId, orderId, transaction) {
   const order = await db.Order.findOne({ where: { id: orderId, user_id: userId }, transaction });
   if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
+  return findOrCreateConfirmation(order, transaction);
+}
+
+/** Same resolution as ownedConfirmation, but ownership is a guest access token, not a signed-in user_id. The token alone determines the order — no order id is ever taken from the request. */
+async function ownedConfirmationForGuest(token, transaction) {
+  const tokenHash = hashOpaqueToken(token);
+  const tokenRow = await db.GuestOrderToken.findOne({ where: { token_hash: tokenHash }, transaction });
+  if (!tokenRow) throw ApiError.notFound('Order not found', 'order_not_found');
+  const order = await db.Order.findOne({ where: { id: tokenRow.order_id, user_id: null }, transaction });
+  if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
+  return findOrCreateConfirmation(order, transaction);
+}
+
+async function findOrCreateConfirmation(order, transaction) {
   let confirmation = await db.OrderPaymentConfirmation.findOne({ where: { order_id: order.id }, transaction });
   if (!confirmation) {
     confirmation = await db.OrderPaymentConfirmation.create({ order_id: order.id, method: 'advance_qr', advance_amount: env.payment.advanceAmount, status: 'pending' }, { transaction });
@@ -21,33 +36,64 @@ async function ownedConfirmation(userId, orderId, transaction) {
   return { order, confirmation };
 }
 
+/* ------------------------- shared core (customer + guest) ------------------------- */
+
+async function doUploadProof(order, confirmation, file, transaction) {
+  if (order.status !== 'pending' || ['approved', 'cod_confirmed'].includes(confirmation.status)) {
+    throw ApiError.badRequest('This order is not eligible for a new payment proof.', 'payment_not_eligible');
+  }
+  const oldFile = confirmation.proof_filename;
+  await confirmation.update({ method: 'advance_qr', status: 'proof_uploaded', proof_filename: file.filename, admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
+  if (oldFile && oldFile !== file.filename) {
+    const oldPath = path.join(proofDir, path.basename(oldFile));
+    fs.promises.unlink(oldPath).catch(() => {});
+  }
+  return confirmation;
+}
+
+async function doRequestCod(order, confirmation, transaction) {
+  if (order.status !== 'pending' || ['approved', 'cod_confirmed'].includes(confirmation.status)) {
+    throw ApiError.badRequest('This order is not eligible for COD confirmation.', 'payment_not_eligible');
+  }
+  await confirmation.update({ method: 'whatsapp_cod', status: 'cod_pending', admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
+  return confirmation;
+}
+
+/* ------------------------------- customer ------------------------------- */
+
 async function uploadProof(userId, orderId, file) {
   if (!file) throw ApiError.badRequest('Select a payment screenshot first.', 'payment_proof_required');
   return db.sequelize.transaction(async (transaction) => {
     const { order, confirmation } = await ownedConfirmation(userId, orderId, transaction);
-    if (order.status !== 'pending' || ['approved', 'cod_confirmed'].includes(confirmation.status)) {
-      throw ApiError.badRequest('This order is not eligible for a new payment proof.', 'payment_not_eligible');
-    }
-    const oldFile = confirmation.proof_filename;
-    await confirmation.update({ method: 'advance_qr', status: 'proof_uploaded', proof_filename: file.filename, admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
-    if (oldFile && oldFile !== file.filename) {
-      const oldPath = path.join(proofDir, path.basename(oldFile));
-      fs.promises.unlink(oldPath).catch(() => {});
-    }
-    return confirmation;
+    return doUploadProof(order, confirmation, file, transaction);
   });
 }
 
 async function requestCod(userId, orderId) {
   return db.sequelize.transaction(async (transaction) => {
     const { order, confirmation } = await ownedConfirmation(userId, orderId, transaction);
-    if (order.status !== 'pending' || ['approved', 'cod_confirmed'].includes(confirmation.status)) {
-      throw ApiError.badRequest('This order is not eligible for COD confirmation.', 'payment_not_eligible');
-    }
-    await confirmation.update({ method: 'whatsapp_cod', status: 'cod_pending', admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
-    return confirmation;
+    return doRequestCod(order, confirmation, transaction);
   });
 }
+
+/* --------------------------------- guest --------------------------------- */
+
+async function uploadProofGuest(token, file) {
+  if (!file) throw ApiError.badRequest('Select a payment screenshot first.', 'payment_proof_required');
+  return db.sequelize.transaction(async (transaction) => {
+    const { order, confirmation } = await ownedConfirmationForGuest(token, transaction);
+    return doUploadProof(order, confirmation, file, transaction);
+  });
+}
+
+async function requestCodGuest(token) {
+  return db.sequelize.transaction(async (transaction) => {
+    const { order, confirmation } = await ownedConfirmationForGuest(token, transaction);
+    return doRequestCod(order, confirmation, transaction);
+  });
+}
+
+/* --------------------------------- admin --------------------------------- */
 
 async function listQueue({ status, page = 1, limit = 20 } = {}) {
   const where = status ? { status } : { status: { [Op.in]: ['proof_uploaded', 'cod_pending', 'rejected'] } };
@@ -88,4 +134,4 @@ async function proofPath(id) {
   return { filePath, filename: confirmation.proof_filename };
 }
 
-module.exports = { uploadProof, requestCod, listQueue, review, proofPath };
+module.exports = { uploadProof, requestCod, uploadProofGuest, requestCodGuest, listQueue, review, proofPath };
