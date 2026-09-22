@@ -15,7 +15,9 @@ const errorHandler = require('./middleware/errorHandler');
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet({ referrerPolicy: { policy: 'same-origin' } }));
+// Guest access tokens are part of guest-order URLs. Never send them as a
+// Referer, including to our own pages or third-party payment/chat links.
+app.use(helmet({ referrerPolicy: { policy: 'no-referrer' } }));
 app.use(
   cors({
     origin: env.clientOrigin.split(',').map((s) => s.trim()),
