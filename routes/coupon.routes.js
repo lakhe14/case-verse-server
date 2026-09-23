@@ -5,11 +5,13 @@ const validate = require('../middleware/validate');
 const { requireAuth, requireType } = require('../middleware/auth');
 const ctrl = require('../controllers/coupon.controller');
 const v = require('../validators/order.validators');
+const { couponValidation } = require('../middleware/rateLimiters');
 
 const router = express.Router();
 
 router.post(
   '/validate',
+  couponValidation,
   requireAuth,
   requireType('customer'),
   validate({ body: v.validateCouponSchema }),

@@ -70,6 +70,15 @@ const topProductsQuery = z.object({
   to: z.coerce.date().optional(),
 });
 
+const paymentQueueQuery = z.object({
+  status: z.enum(['pending', 'proof_uploaded', 'approved', 'rejected', 'cod_pending', 'cod_confirmed']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+const paymentReviewSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+
 module.exports = {
   createCouponSchema,
   updateCouponSchema,
@@ -82,4 +91,6 @@ module.exports = {
   dashboardQuery,
   salesQuery,
   topProductsQuery,
+  paymentQueueQuery,
+  paymentReviewSchema,
 };

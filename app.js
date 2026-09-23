@@ -11,10 +11,12 @@ const env = require('./config/env');
 const apiRouter = require('./routes');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
+const requestId = require('./middleware/requestId');
 
 const app = express();
 
 app.set('trust proxy', 1);
+app.use(requestId);
 // Guest access tokens are part of guest-order URLs. Never send them as a
 // Referer, including to our own pages or third-party payment/chat links.
 app.use(helmet({ referrerPolicy: { policy: 'no-referrer' } }));

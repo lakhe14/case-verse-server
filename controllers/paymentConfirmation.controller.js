@@ -29,6 +29,8 @@ exports.reject = asyncHandler(async (req, res) => {
 });
 exports.proof = asyncHandler(async (req, res) => {
   const { filePath, filename } = await payments.proofPath(req.params.id);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', 'inline; filename="payment-proof"');
   res.type(path.extname(filename));
   res.sendFile(filePath);
 });

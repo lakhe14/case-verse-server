@@ -1,6 +1,5 @@
 'use strict';
 
-const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
 
 // eslint-disable-next-line no-unused-vars
@@ -42,12 +41,14 @@ function errorHandler(err, req, res, next) {
   }
 
   if (status >= 500) {
-    console.error(err);
+    // Keep diagnostics server-side and avoid serializing an Error object that
+    // may contain driver/upstream details or a guest token in its request URL.
+    const safeUrl = (req.originalUrl || '').replace(/(\/api\/guest-checkout\/orders\/)[^/?]+/g, '$1<redacted>');
+    console.error({ requestId: req.requestId, method: req.method, url: safeUrl, error: err?.name, message: err?.message, stack: err?.stack });
   }
 
-  const payload = { error: { message, code } };
+  const payload = { error: { message, code, request_id: req.requestId } };
   if (details) payload.error.details = details;
-  if (!env.isProd && status >= 500) payload.error.stack = err.stack;
 
   res.status(status).json(payload);
 }
