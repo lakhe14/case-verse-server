@@ -10,6 +10,7 @@ const { computeCoverBundle } = require('./bundle.service');
 const loyalty = require('./loyalty.service');
 const env = require('../config/env');
 const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
+const idempotency = require('./guestIdempotency');
 
 const { ORDER_STATUSES } = require('../models/order.model');
 
@@ -542,8 +543,68 @@ async function resolveGuestToken(token, transaction) {
   return record ? record.order_id : null;
 }
 
-async function placeGuestOrder({ items, guest }) {
+const isIdempotencyKeyCollision = (error) => error?.name === 'SequelizeUniqueConstraintError'
+  && /uq_guest_idem_key/.test(error.parent?.sqlMessage || error.original?.sqlMessage || '');
+
+/**
+ * Returns the committed result for a repeated Idempotency-Key. Same payload:
+ * the original order plus its recovered guest token. Different payload: 409.
+ * An expired reservation is purged and reported so the caller can retry once.
+ */
+async function replayGuestOrder({ rawKey, keyHash, fingerprint }) {
+  const record = await db.GuestOrderIdempotency.findOne({ where: { key_hash: keyHash } });
+  if (!record) return { retry: true };
+  if (record.expires_at <= new Date()) {
+    await db.GuestOrderIdempotency.destroy({ where: { id: record.id, expires_at: { [Op.lte]: new Date() } } });
+    return { retry: true };
+  }
+  if (record.request_fingerprint !== fingerprint) {
+    throw new ApiError(409, 'This checkout request has already been used for a different order attempt.', 'idempotency_key_reused');
+  }
+  const token = record.replay_token_sealed
+    ? idempotency.openGuestToken(record.replay_token_sealed, { rawKey, keyHash, secret: env.guestReplaySecret })
+    : null;
+  const order = record.order_id ? await db.Order.findOne({ where: { id: record.order_id, user_id: null }, include: orderInclude }) : null;
+  if (!order || !token) {
+    throw new ApiError(409, 'This order was already placed. Please use the order link you received, or contact support.', 'idempotency_replay_unavailable');
+  }
+  return { order: shapeOrder(order), guest_token: token, replayed: true };
+}
+
+/**
+ * Idempotent guest placement. The reservation row is the FIRST write in the
+ * same transaction as the order, keyed by a UNIQUE key_hash:
+ * - a concurrent request with the same key blocks on InnoDB's unique-index
+ *   lock until this transaction ends, then either collides (commit: replay
+ *   the committed result) or becomes the creator (rollback);
+ * - any failure rolls the reservation back with the order, so the key is
+ *   never left half-used and a retry re-executes cleanly.
+ * The database enforces this, so it holds across processes and instances.
+ */
+async function placeGuestOrder(payload, { idempotencyKey } = {}) {
+  const rawKey = idempotency.parseIdempotencyKey(idempotencyKey);
+  const keyHash = idempotency.hashIdempotencyKey(rawKey);
+  const fingerprint = idempotency.fingerprintGuestRequest(payload);
+  // Opportunistic retention: replay records live 24 hours.
+  await db.GuestOrderIdempotency.destroy({ where: { expires_at: { [Op.lte]: new Date() } } });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await createGuestOrder(payload, { rawKey, keyHash, fingerprint });
+    } catch (error) {
+      if (!isIdempotencyKeyCollision(error)) throw error;
+      const replay = await replayGuestOrder({ rawKey, keyHash, fingerprint });
+      if (!replay.retry) return replay;
+    }
+  }
+  throw new ApiError(409, 'This checkout request is already being processed. Please try again.', 'idempotency_in_progress');
+}
+
+async function createGuestOrder({ items, guest }, { rawKey, keyHash, fingerprint }) {
   return db.sequelize.transaction(async (t) => {
+    const reservation = await db.GuestOrderIdempotency.create(
+      { key_hash: keyHash, request_fingerprint: fingerprint, expires_at: new Date(Date.now() + idempotency.REPLAY_TTL_MS) },
+      { transaction: t }
+    );
     const { items: lines } = await loadGuestLines(items, t);
     const shippingAddress = guestShippingAddress(guest);
     const variantMap = await lockVariantsForItems(lines, t);
@@ -598,9 +659,13 @@ async function placeGuestOrder({ items, guest }) {
     // High-entropy random token; only its sha256 hash is ever stored.
     const { raw, hash } = generateOpaqueToken();
     await db.GuestOrderToken.create({ order_id: order.id, token_hash: hash }, { transaction: t });
+    await reservation.update({
+      order_id: order.id,
+      replay_token_sealed: idempotency.sealGuestToken(raw, { rawKey, keyHash, secret: env.guestReplaySecret }),
+    }, { transaction: t });
 
     const shaped = await db.Order.findOne({ where: { id: order.id }, include: orderInclude, transaction: t });
-    return { order: shapeOrder(shaped), guest_token: raw };
+    return { order: shapeOrder(shaped), guest_token: raw, replayed: false };
   });
 }
 

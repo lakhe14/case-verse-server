@@ -143,7 +143,29 @@ module.exports = (sequelize) => {
     }
   );
 
-  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken };
+  // One row per guest checkout submission. Only hashes and a sealed replay
+  // token are stored (see services/guestIdempotency.js).
+  class GuestOrderIdempotency extends Model {}
+  GuestOrderIdempotency.init(
+    {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+      key_hash: { type: DataTypes.CHAR(64), allowNull: false, unique: 'uq_guest_idem_key' },
+      request_fingerprint: { type: DataTypes.CHAR(64), allowNull: false },
+      order_id: { type: DataTypes.INTEGER, allowNull: true },
+      replay_token_sealed: { type: DataTypes.STRING(255), allowNull: true },
+      expires_at: { type: DataTypes.DATE, allowNull: false },
+    },
+    {
+      sequelize,
+      modelName: 'GuestOrderIdempotency',
+      tableName: 'guest_order_idempotency',
+      timestamps: true,
+      createdAt: 'created_at',
+      updatedAt: false,
+    }
+  );
+
+  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken, GuestOrderIdempotency };
 };
 
 module.exports.ORDER_STATUSES = ORDER_STATUSES;

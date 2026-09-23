@@ -384,4 +384,25 @@ CREATE TABLE store_settings (
     `value`     VARCHAR(500) NOT NULL
 ) ENGINE=InnoDB;
 
+-- ============================================================
+-- 10. GUEST ORDER IDEMPOTENCY
+-- ============================================================
+
+-- One row per guest checkout submission (Idempotency-Key header). Only the
+-- key's SHA-256 and a SHA-256 request fingerprint are stored, never the raw
+-- key or the request body. replay_token_sealed is the guest access token
+-- encrypted for 24h so a retry after a lost response can recover the order.
+CREATE TABLE guest_order_idempotency (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    key_hash            CHAR(64) NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
+    order_id            INT NULL,
+    replay_token_sealed VARCHAR(255) NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at          DATETIME NOT NULL,
+    UNIQUE KEY uq_guest_idem_key (key_hash),
+    INDEX idx_guest_idem_expires (expires_at),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 SET FOREIGN_KEY_CHECKS = 1;

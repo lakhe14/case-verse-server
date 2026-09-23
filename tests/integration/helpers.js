@@ -6,6 +6,7 @@
  * an *_e2e database; config/env.js re-checks on require.
  */
 
+const crypto = require('crypto');
 const fs = require('fs');
 const request = require('supertest');
 const app = require('../../app');
@@ -87,10 +88,12 @@ function guestDetails(label = 'guest') {
 }
 
 /** Places a real guest order. The raw token stays in memory and is never printed. */
-async function placeGuestOrder(lines, { label = 'guest', extra = {}, guestExtra = {} } = {}) {
+const newIdempotencyKey = () => crypto.randomUUID();
+
+async function placeGuestOrder(lines, { label = 'guest', extra = {}, guestExtra = {}, key = newIdempotencyKey() } = {}) {
   const items = [];
   for (const { sku, quantity } of lines) items.push({ variant_id: (await variant(sku)).id, quantity });
-  return api().post('/api/guest-checkout/orders').send({ items, guest: { ...guestDetails(label), ...guestExtra }, ...extra });
+  return api().post('/api/guest-checkout/orders').set('Idempotency-Key', key).send({ items, guest: { ...guestDetails(label), ...guestExtra }, ...extra });
 }
 
 function proofFiles() {
@@ -100,4 +103,4 @@ function proofFiles() {
 // Smallest valid PNG, generated per test run from constant bytes (no real proof images).
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
-module.exports = { api, db, env, RUN_ID, login, auth, SKU, variant, stockOf, clearCart, placeCustomerOrder, placeGuestOrder, guestDetails, proofFiles, PNG };
+module.exports = { api, db, env, RUN_ID, login, auth, SKU, variant, stockOf, clearCart, placeCustomerOrder, placeGuestOrder, newIdempotencyKey, guestDetails, proofFiles, PNG };

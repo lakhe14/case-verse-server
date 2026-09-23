@@ -18,6 +18,7 @@ const MIGRATIONS = [
   'migrateGuestCheckout.js',
   'migrateDashainCampaign.js',
   'migrateParcelMooverCourier.js',
+  'migrateGuestOrderIdempotency.js',
 ];
 
 function connectionOptions(url, withDatabase) {

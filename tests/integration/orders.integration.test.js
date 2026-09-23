@@ -105,7 +105,7 @@ describe('server-authoritative pricing', () => {
     });
     expect(forged.status).toBe(201);
     // Also forge per-line prices directly.
-    const lineForged = await api().post('/api/guest-checkout/orders').send({
+    const lineForged = await api().post('/api/guest-checkout/orders').set('Idempotency-Key', require('./helpers').newIdempotencyKey()).send({
       items: [{ variant_id: v.id, quantity: 1, unit_price: 1, line_total: 1, price: 1 }],
       guest: { ...require('./helpers').guestDetails('line-tamper'), shipping_amount: 0 },
       total_amount: 1,

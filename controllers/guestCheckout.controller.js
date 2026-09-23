@@ -10,9 +10,11 @@ exports.preview = asyncHandler(async (req, res) => {
 });
 
 exports.place = asyncHandler(async (req, res) => {
-  const { order, guest_token } = await orders.placeGuestOrder(req.body);
-  // The raw token is returned exactly once, here, and never logged or stored.
-  res.status(201).json({ data: order, guest_token });
+  const { order, guest_token, replayed } = await orders.placeGuestOrder(req.body, { idempotencyKey: req.get('Idempotency-Key') });
+  // The raw token is never logged. A replay of the same Idempotency-Key returns
+  // the same order and recovered token with 200 instead of 201.
+  if (replayed) res.set('Idempotent-Replayed', 'true');
+  res.status(replayed ? 200 : 201).json({ data: order, guest_token });
 });
 
 exports.get = asyncHandler(async (req, res) => {

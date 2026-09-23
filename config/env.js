@@ -122,6 +122,10 @@ const env = {
     pointValue: parseFloat(process.env.LOYALTY_POINT_VALUE || '1'),
   },
 
+  // Seals guest tokens for idempotent replay (see services/guestIdempotency.js).
+  // A dedicated secret is preferred; the refresh secret is the fallback.
+  guestReplaySecret: process.env.GUEST_REPLAY_SECRET || process.env.JWT_REFRESH_SECRET,
+
   payment: {
     advanceAmount: parseFloat(process.env.PAYMENT_ADVANCE_AMOUNT || '100'),
     provider: process.env.PAYMENT_PROVIDER || 'eSewa',

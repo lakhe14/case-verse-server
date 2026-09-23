@@ -132,12 +132,14 @@ async function cleanup({ runId } = {}) {
       const items = await db.OrderItem.findAll({ where: { order_id: { [Op.in]: orderIds } }, attributes: ['id'], transaction });
       if (items.length) await db.Review.update({ order_item_id: null }, { where: { order_item_id: { [Op.in]: items.map((i) => i.id) } }, transaction });
       counts.payment_confirmations = await db.OrderPaymentConfirmation.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction });
+      counts.idempotency_rows = await db.GuestOrderIdempotency.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction });
       await db.CouponUsage.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction });
       await db.LoyaltyTransaction.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction });
       // guest tokens, items, promo items and status history cascade with the order.
       await db.Order.destroy({ where: { id: { [Op.in]: orderIds } }, transaction });
     } else {
       counts.payment_confirmations = 0;
+      counts.idempotency_rows = 0;
     }
     if (userIds.length) {
       const carts = await db.Cart.findAll({ where: { user_id: { [Op.in]: userIds } }, attributes: ['id'], transaction });
@@ -174,6 +176,8 @@ async function verify() {
     e2e_orders: orderIds.length,
     e2e_payment_confirmations: orderIds.length ? await db.OrderPaymentConfirmation.count({ where: { order_id: { [Op.in]: orderIds } } }) : 0,
     e2e_guest_orders: await db.Order.count({ where: buildOrderScope({}) }),
+    e2e_idempotency_rows: orderIds.length ? await db.GuestOrderIdempotency.count({ where: { order_id: { [Op.in]: orderIds } } }) : 0,
+    idempotency_rows_in_e2e_db: await db.GuestOrderIdempotency.count(),
     other_orders_in_e2e_db: (await db.Order.count()) - orderIds.length,
     proof_files: fs.existsSync(dir) ? fs.readdirSync(dir).length : 0,
     stock_mismatches: variants.filter((v) => v.stock_quantity !== stock.get(v.sku)).length + (stock.size - variants.length),
@@ -185,6 +189,7 @@ async function verify() {
 
 function isClean(result) {
   return result.e2e_orders === 0 && result.e2e_payment_confirmations === 0 && result.e2e_guest_orders === 0
+    && result.e2e_idempotency_rows === 0 && result.idempotency_rows_in_e2e_db === 0
     && result.other_orders_in_e2e_db === 0 && result.proof_files === 0 && result.stock_mismatches === 0
     && result.fixture_cart_items === 0 && result.fixture_customers_active === 2 && result.fixture_staff_active === 2;
 }
