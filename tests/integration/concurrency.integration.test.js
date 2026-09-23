@@ -1,15 +1,15 @@
 'use strict';
 
-const { api, db, login, auth, SKU, variant, stockOf, clearCart } = require('./helpers');
+const { api, db, login, auth, SKU, variant, inventoryOf, clearCart } = require('./helpers');
 
 afterAll(() => db.sequelize.close());
 
 describe('duplicate order submission', () => {
-  it('two simultaneous placements of one cart create exactly one order and one stock decrement', async () => {
+  it('two simultaneous placements of one cart create exactly one order and one reservation', async () => {
     const customer = await login('customerB');
     await clearCart(customer);
     const sku = SKU.pinkBow12;
-    const before = await stockOf(sku);
+    const before = await inventoryOf(sku);
     const added = await api().post('/api/cart/items').set(auth(customer)).send({ variant_id: (await variant(sku)).id, quantity: 1 });
     expect(added.status).toBe(201);
     const addresses = await api().get('/api/addresses').set(auth(customer));
@@ -24,6 +24,9 @@ describe('duplicate order submission', () => {
     expect(statuses).toEqual([201, 400]);
     expect(results.find((r) => r.status === 400).body.error.code).toBe('cart_empty');
     expect(await db.Order.count({ where: { user_id: customer.profile.id } })).toBe(ordersBefore + 1);
-    expect(await stockOf(sku)).toBe(before - 1);
+    // Physical stock is untouched until payment confirmation; one unit is held.
+    expect(await inventoryOf(sku)).toEqual({ physical: before.physical, reserved: before.reserved + 1, available: before.available - 1 });
+    const orderId = results.find((r) => r.status === 201).body.data.id;
+    expect(await db.InventoryReservation.count({ where: { order_id: orderId } })).toBe(1);
   });
 });

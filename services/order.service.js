@@ -11,6 +11,7 @@ const loyalty = require('./loyalty.service');
 const env = require('../config/env');
 const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
 const idempotency = require('./guestIdempotency');
+const inventory = require('./inventory.service');
 
 const { ORDER_STATUSES } = require('../models/order.model');
 
@@ -111,12 +112,16 @@ function totalShippingWeightKg(items) {
  * Pure-ish: reads coupon/shipping/tax config but writes nothing.
  */
 async function computeTotals({ userId, items, shippingAddress, parcelmooverDestinationId, couponCode, redeemPoints = 0 }, transaction) {
+  // Sellable quantity is physical stock minus active reservations. Inside a
+  // placement transaction the variants are already locked and reservations are
+  // read with a locking read, so concurrent orders cannot both take the last unit.
+  const availability = await inventory.availabilityFor(items.map((item) => item.variant), { transaction });
   const lines = items.map((item) => {
     const variant = item.variant;
     if (!variant || !variant.is_active) {
       throw ApiError.badRequest('A product in your cart is no longer available', 'variant_unavailable');
     }
-    if (variant.stock_quantity < item.quantity) {
+    if (availability.get(variant.id).available < item.quantity) {
       throw ApiError.badRequest(
         `Insufficient stock for ${variant.product?.name || variant.sku}`,
         'insufficient_stock'
@@ -259,7 +264,7 @@ async function previewOrder(userId, { shipping_address_id, parcelmoover_destinat
  * payment confirmation row. `orderAttrs` differs (user_id + addresses vs.
  * guest_* fields), everything after that is identical.
  */
-async function createOrderAndSideEffects({ orderAttrs, totals, variantMap, transaction: t }) {
+async function createOrderAndSideEffects({ orderAttrs, totals, transaction: t }) {
   const order = await db.Order.create(orderAttrs, { transaction: t });
 
   await db.OrderItem.bulkCreate(
@@ -275,12 +280,9 @@ async function createOrderAndSideEffects({ orderAttrs, totals, variantMap, trans
     { transaction: t }
   );
 
-  // Decrement stock.
-  for (const line of totals.lines) {
-    const variant = variantMap.get(line.variant_id);
-    variant.stock_quantity -= line.quantity;
-    await variant.save({ transaction: t });
-  }
+  // Reserve, don't deduct: physical stock changes only when payment is
+  // approved or COD is confirmed (inventory.commitForOrder).
+  await inventory.reserveForOrder(order.id, totals.lines, t);
 
   // Snapshot free promotional items (e.g. the Dashain suction holder).
   // These carry no catalogue SKU and never touch inventory.
@@ -340,8 +342,10 @@ async function lockVariantsForItems(items, transaction) {
 
 async function placeOrder(userId, payload) {
   const { shipping_address_id, billing_address_id, parcelmoover_destination_id, coupon_code, redeem_points } = payload;
+  // Bookkeeping only; availability already ignores lapsed holds.
+  await inventory.expireStale();
 
-  return db.sequelize.transaction(async (t) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (t) => {
     const { cart, items } = await loadCartLines(userId, t, { lock: true });
 
     const shippingAddress = await requireOwnedAddress(userId, shipping_address_id, t);
@@ -349,7 +353,7 @@ async function placeOrder(userId, payload) {
       ? await requireOwnedAddress(userId, billing_address_id, t)
       : shippingAddress;
 
-    const variantMap = await lockVariantsForItems(items, t);
+    await lockVariantsForItems(items, t);
 
     const totals = await computeTotals(
       {
@@ -391,7 +395,6 @@ async function placeOrder(userId, payload) {
         billing_address_id: billingAddress.id,
       },
       totals,
-      variantMap,
       transaction: t,
     });
 
@@ -585,8 +588,9 @@ async function placeGuestOrder(payload, { idempotencyKey } = {}) {
   const rawKey = idempotency.parseIdempotencyKey(idempotencyKey);
   const keyHash = idempotency.hashIdempotencyKey(rawKey);
   const fingerprint = idempotency.fingerprintGuestRequest(payload);
-  // Opportunistic retention: replay records live 24 hours.
+  // Opportunistic retention: replay records live 24 hours; lapsed stock holds are marked expired.
   await db.GuestOrderIdempotency.destroy({ where: { expires_at: { [Op.lte]: new Date() } } });
+  await inventory.expireStale();
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       return await createGuestOrder(payload, { rawKey, keyHash, fingerprint });
@@ -600,14 +604,14 @@ async function placeGuestOrder(payload, { idempotencyKey } = {}) {
 }
 
 async function createGuestOrder({ items, guest }, { rawKey, keyHash, fingerprint }) {
-  return db.sequelize.transaction(async (t) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (t) => {
     const reservation = await db.GuestOrderIdempotency.create(
       { key_hash: keyHash, request_fingerprint: fingerprint, expires_at: new Date(Date.now() + idempotency.REPLAY_TTL_MS) },
       { transaction: t }
     );
     const { items: lines } = await loadGuestLines(items, t);
     const shippingAddress = guestShippingAddress(guest);
-    const variantMap = await lockVariantsForItems(lines, t);
+    await lockVariantsForItems(lines, t);
 
     const totals = await computeTotals(
       { userId: null, items: lines, shippingAddress, parcelmooverDestinationId: guest.parcelmoover_destination_id, couponCode: undefined, redeemPoints: 0 },
@@ -652,7 +656,6 @@ async function createGuestOrder({ items, guest }, { rawKey, keyHash, fingerprint
         billing_address_id: null,
       },
       totals,
-      variantMap,
       transaction: t,
     });
 
@@ -767,15 +770,23 @@ async function transitionOrderStatus(orderId, { status, note }, staffId, transac
           'payment_confirmation_required'
         );
       }
+      // Confirmation commits the reserved stock in the same transaction; never
+      // let fulfilment start on stock that is still only held.
+      await inventory.assertCommitted(order.id, t);
     }
 
-    // Restock on cancellation.
     if (status === 'cancelled') {
-      for (const item of order.items) {
-        await db.ProductVariant.increment(
-          { stock_quantity: item.quantity },
-          { where: { id: item.variant_id }, transaction: t }
-        );
+      // Held stock is released (physical unchanged); committed stock is
+      // restocked exactly once. Legacy orders placed before reservations
+      // existed were deducted at placement and are restocked from their items.
+      const { hadReservations } = await inventory.releaseForOrder(order.id, t);
+      if (!hadReservations) {
+        for (const item of order.items) {
+          await db.ProductVariant.increment(
+            { stock_quantity: item.quantity },
+            { where: { id: item.variant_id }, transaction: t }
+          );
+        }
       }
     }
 

@@ -3,7 +3,7 @@
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { slugify } = require('../utils/slug');
-const { productInclude, shapeProduct } = require('./catalog.service');
+const { productInclude, shapeProducts } = require('./catalog.service');
 
 /* ------------------------------ Categories ------------------------------ */
 
@@ -186,7 +186,7 @@ async function deleteImage(imageId) {
 
 async function loadProduct(productId, transaction) {
   const product = await db.Product.findByPk(productId, { include: productInclude, transaction });
-  return shapeProduct(product, { publicOnly: false });
+  return (await shapeProducts([product], { publicOnly: false }))[0];
 }
 
 async function adminListProducts({ page = 1, limit = 20, q, status } = {}) {
@@ -202,7 +202,7 @@ async function adminListProducts({ page = 1, limit = 20, q, status } = {}) {
     distinct: true,
   });
   return {
-    data: rows.map((p) => shapeProduct(p, { publicOnly: false })),
+    data: await shapeProducts(rows, { publicOnly: false }),
     pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
   };
 }

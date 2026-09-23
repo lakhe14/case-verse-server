@@ -17,7 +17,7 @@ const {
 } = require('./catalog.model')(sequelize);
 const { Cart, CartItem, Wishlist } = require('./cart.model')(sequelize);
 const { Coupon, CouponUsage } = require('./coupon.model')(sequelize);
-const { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken, GuestOrderIdempotency } = require('./order.model')(sequelize);
+const { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken, GuestOrderIdempotency, InventoryReservation } = require('./order.model')(sequelize);
 const Review = require('./review.model')(sequelize);
 const LoyaltyTransaction = require('./loyalty.model')(sequelize);
 const { ShippingRate, StoreSetting } = require('./settings.model')(sequelize);
@@ -120,6 +120,9 @@ OrderPromoItem.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
 Order.hasOne(GuestOrderToken, { foreignKey: 'order_id', as: 'guestToken' });
 GuestOrderToken.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
 GuestOrderIdempotency.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
+Order.hasMany(InventoryReservation, { foreignKey: 'order_id', as: 'reservations' });
+InventoryReservation.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
+InventoryReservation.belongsTo(ProductVariant, { foreignKey: 'variant_id', as: 'variant' });
 
 // Reviews
 Product.hasMany(Review, { foreignKey: 'product_id', as: 'reviews' });
@@ -161,6 +164,7 @@ const db = {
   OrderPromoItem,
   GuestOrderToken,
   GuestOrderIdempotency,
+  InventoryReservation,
   Review,
   LoyaltyTransaction,
   ShippingRate,

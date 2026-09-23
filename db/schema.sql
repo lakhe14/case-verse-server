@@ -405,4 +405,26 @@ CREATE TABLE guest_order_idempotency (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- ============================================================
+-- 11. INVENTORY RESERVATIONS
+-- ============================================================
+
+-- Unpaid orders reserve stock; product_variants.stock_quantity (physical) is
+-- deducted only when payment is approved / COD confirmed. Available to sell =
+-- stock_quantity - SUM(quantity) of active, unexpired reservations.
+CREATE TABLE inventory_reservations (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    order_id    INT NOT NULL,
+    variant_id  INT NOT NULL,
+    quantity    INT NOT NULL,
+    status      ENUM('active','committed','released','expired','restocked') NOT NULL DEFAULT 'active',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    expires_at  DATETIME NOT NULL,
+    UNIQUE KEY uq_reservation_order_variant (order_id, variant_id),
+    INDEX idx_reservation_availability (variant_id, status, expires_at),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (variant_id) REFERENCES product_variants(id)
+) ENGINE=InnoDB;
+
 SET FOREIGN_KEY_CHECKS = 1;

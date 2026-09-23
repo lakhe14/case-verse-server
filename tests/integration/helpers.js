@@ -41,6 +41,12 @@ const SKU = {
   pinkBow12ProMax: skuFor('Pink love bow', 'iPhone 12 Pro Max'),
   pinkBow13ProMax: skuFor('Pink love bow', 'iPhone 13 Pro Max'),
   pinkBow14ProMax: skuFor('Pink love bow', 'iPhone 14 Pro Max'),
+  glossyWhite: skuFor('Glossy white', 'iPhone 14'),
+  chetah14: skuFor('Chetah iconic', 'iPhone 14'),
+  chetah15Pro: skuFor('Chetah iconic', 'iPhone 15 Pro'),
+  bowCherry13: skuFor('Bow cherry iconic', 'iPhone 13'),
+  bowCherry15: skuFor('Bow cherry iconic', 'iPhone 15'),
+  pinkFloral17Pro: skuFor('Pink Floral', 'iPhone 17 Pro'),
   flameSilver: skuFor('Flame silver', 'iPhone 11 Pro'),
   stockProbe: skuFor('E2E Stock probe', 'iPhone 15'),
 };
@@ -49,8 +55,15 @@ async function variant(sku) {
   return db.ProductVariant.findOne({ where: { sku } });
 }
 
+/** Physical stock (product_variants.stock_quantity). */
 async function stockOf(sku) {
   return (await variant(sku)).stock_quantity;
+}
+
+/** { physical, reserved, available } using the same service the API uses. */
+async function inventoryOf(sku) {
+  const v = await variant(sku);
+  return (await require('../../services/inventory.service').availabilityFor([v])).get(v.id);
 }
 
 async function defaultAddressId(session) {
@@ -103,4 +116,4 @@ function proofFiles() {
 // Smallest valid PNG, generated per test run from constant bytes (no real proof images).
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
-module.exports = { api, db, env, RUN_ID, login, auth, SKU, variant, stockOf, clearCart, placeCustomerOrder, placeGuestOrder, newIdempotencyKey, guestDetails, proofFiles, PNG };
+module.exports = { api, db, env, RUN_ID, login, auth, SKU, variant, stockOf, inventoryOf, clearCart, placeCustomerOrder, placeGuestOrder, newIdempotencyKey, guestDetails, proofFiles, PNG };

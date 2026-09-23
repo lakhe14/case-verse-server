@@ -2,7 +2,7 @@
 
 const { Op } = require('sequelize');
 const {
-  api, db, SKU, variant, stockOf, placeGuestOrder, newIdempotencyKey, guestDetails,
+  api, db, SKU, variant, stockOf, inventoryOf, placeGuestOrder, newIdempotencyKey, guestDetails,
 } = require('./helpers');
 
 afterAll(() => db.sequelize.close());
@@ -19,10 +19,11 @@ async function countsFor(label) {
     history: ids.length ? await db.OrderStatusHistory.count({ where: { order_id: { [Op.in]: ids } } }) : 0,
     tokens: ids.length ? await db.GuestOrderToken.count({ where: { order_id: { [Op.in]: ids } } }) : 0,
     reservations: ids.length ? await db.GuestOrderIdempotency.count({ where: { order_id: { [Op.in]: ids } } }) : 0,
+    holds: ids.length ? await db.InventoryReservation.count({ where: { order_id: { [Op.in]: ids } } }) : 0,
   };
 }
 
-const one = { orders: 1, items: 1, confirmations: 1, history: 1, tokens: 1, reservations: 1 };
+const one = { orders: 1, items: 1, confirmations: 1, history: 1, tokens: 1, reservations: 1, holds: 1 };
 
 describe('guest order idempotency (DB-backed, caseverse_e2e)', () => {
   it('rejects a missing or malformed Idempotency-Key before creating anything', async () => {
@@ -38,9 +39,9 @@ describe('guest order idempotency (DB-backed, caseverse_e2e)', () => {
     expect((await countsFor('no-key')).orders).toBe(0);
   });
 
-  it('A: same key + same payload sequentially returns the same order and decrements once', async () => {
+  it('A: same key + same payload sequentially returns the same order and reserves once', async () => {
     const key = newIdempotencyKey();
-    const before = await stockOf(SKU.pinkBow12);
+    const before = await inventoryOf(SKU.pinkBow12);
     const first = await placeGuestOrder([{ sku: SKU.pinkBow12, quantity: 2 }], { label: 'idem-seq', key });
     const second = await placeGuestOrder([{ sku: SKU.pinkBow12, quantity: 2 }], { label: 'idem-seq', key });
     expect(first.status).toBe(201);
@@ -49,14 +50,14 @@ describe('guest order idempotency (DB-backed, caseverse_e2e)', () => {
     expect(second.body.data.id).toBe(first.body.data.id);
     expect(second.body.data.order_number).toBe(first.body.data.order_number);
     expect(second.body.guest_token).toBe(first.body.guest_token);
-    expect(await stockOf(SKU.pinkBow12)).toBe(before - 2);
+    expect(await inventoryOf(SKU.pinkBow12)).toEqual({ physical: before.physical, reserved: before.reserved + 2, available: before.available - 2 });
     expect(await countsFor('idem-seq')).toEqual(one);
   });
 
-  it('B: same key + same payload concurrently creates exactly one order, one decrement, one confirmation', async () => {
+  it('B: same key + same payload concurrently creates exactly one order, one reservation, one confirmation', async () => {
     const key = newIdempotencyKey();
     const sku = SKU.pinkBow12ProMax;
-    const before = await stockOf(sku);
+    const before = await inventoryOf(sku);
     const results = await Promise.all([
       placeGuestOrder([{ sku, quantity: 2 }], { label: 'idem-concurrent', key }),
       placeGuestOrder([{ sku, quantity: 2 }], { label: 'idem-concurrent', key }),
@@ -65,7 +66,7 @@ describe('guest order idempotency (DB-backed, caseverse_e2e)', () => {
     expect(results.map((r) => r.status).sort()).toEqual([200, 200, 201]);
     expect(new Set(results.map((r) => r.body.data.id)).size).toBe(1);
     expect(new Set(results.map((r) => r.body.guest_token)).size).toBe(1);
-    expect(await stockOf(sku)).toBe(before - 2);
+    expect(await inventoryOf(sku)).toEqual({ physical: before.physical, reserved: before.reserved + 2, available: before.available - 2 });
     expect(await countsFor('idem-concurrent')).toEqual(one);
     const order = (await ordersFor('idem-concurrent'))[0];
     expect(order.items[0].quantity).toBe(2);
@@ -75,12 +76,12 @@ describe('guest order idempotency (DB-backed, caseverse_e2e)', () => {
     const key = newIdempotencyKey();
     const first = await placeGuestOrder([{ sku: SKU.pinkBow12, quantity: 1 }], { label: 'idem-diff', key });
     expect(first.status).toBe(201);
-    const stock = await stockOf(SKU.pinkBow12);
+    const stock = await inventoryOf(SKU.pinkBow12);
     const changed = await placeGuestOrder([{ sku: SKU.pinkBow12, quantity: 2 }], { label: 'idem-diff', key });
     expect(changed.status).toBe(409);
     expect(changed.body.error).toMatchObject({ code: 'idempotency_key_reused', message: 'This checkout request has already been used for a different order attempt.' });
     expect(JSON.stringify(changed.body)).not.toMatch(/[a-f0-9]{64}|guest_token/);
-    expect(await stockOf(SKU.pinkBow12)).toBe(stock);
+    expect(await inventoryOf(SKU.pinkBow12)).toEqual(stock);
     expect(await countsFor('idem-diff')).toEqual(one);
   });
 
@@ -112,9 +113,13 @@ describe('guest order idempotency (DB-backed, caseverse_e2e)', () => {
     await probe.update({ stock_quantity: stock + 1 });
     const retried = await placeGuestOrder([{ sku: SKU.stockProbe, quantity: stock + 1 }], { label: 'idem-stock', key });
     expect(retried.status).toBe(201);
-    expect(await stockOf(SKU.stockProbe)).toBe(0);
-    await probe.update({ stock_quantity: stock });
+    // Held, not deducted: physical stays, nothing left to sell.
+    expect(await inventoryOf(SKU.stockProbe)).toEqual({ physical: stock + 1, reserved: stock + 1, available: 0 });
     expect(await countsFor('idem-stock')).toEqual(one);
+    // Release the hold so later suites see the fixture stock again.
+    expect((await api().post(`/api/guest-checkout/orders/${retried.body.guest_token}/cancel`)).status).toBe(200);
+    await probe.update({ stock_quantity: stock });
+    expect(await inventoryOf(SKU.stockProbe)).toEqual({ physical: stock, reserved: 0, available: stock });
   });
 
   it('F: after a lost response, retrying the key recovers access to the same order', async () => {

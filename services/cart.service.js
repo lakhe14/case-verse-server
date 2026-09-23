@@ -2,6 +2,7 @@
 
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
+const inventory = require('./inventory.service');
 const { computeCoverBundle } = require('./bundle.service');
 
 async function getOrCreateCart(userId, transaction) {
@@ -38,11 +39,13 @@ async function shapeCart(cart, transaction) {
     transaction,
   });
 
+  // Customers see what they can actually buy: physical minus active reservations.
+  const availability = await inventory.availabilityFor(items.map((item) => item.variant));
   const lines = items.map((item) => {
     const variant = item.variant;
     const product = variant?.product;
     const unitPrice = variant ? Number(variant.price) : 0;
-    const available = variant ? variant.stock_quantity : 0;
+    const available = variant ? availability.get(variant.id).available : 0;
     return {
       id: item.id,
       variant_id: item.variant_id,
@@ -104,9 +107,10 @@ async function addItem(userId, { variant_id, quantity }) {
       transaction: t,
     });
     const nextQty = (existing ? existing.quantity : 0) + quantity;
-    if (nextQty > variant.stock_quantity) {
+    const { available } = (await inventory.availabilityFor([variant])).get(variant.id);
+    if (nextQty > available) {
       throw ApiError.badRequest(
-        `Only ${variant.stock_quantity} in stock`,
+        `Only ${available} in stock`,
         'insufficient_stock'
       );
     }
@@ -137,8 +141,9 @@ async function updateItem(userId, itemId, { quantity }) {
       await item.destroy({ transaction: t });
       return shapeCart(cart, t);
     }
-    if (quantity > item.variant.stock_quantity) {
-      throw ApiError.badRequest(`Only ${item.variant.stock_quantity} in stock`, 'insufficient_stock');
+    const { available } = (await inventory.availabilityFor([item.variant])).get(item.variant.id);
+    if (quantity > available) {
+      throw ApiError.badRequest(`Only ${available} in stock`, 'insufficient_stock');
     }
     item.quantity = quantity;
     await item.save({ transaction: t });

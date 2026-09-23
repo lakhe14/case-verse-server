@@ -165,7 +165,28 @@ module.exports = (sequelize) => {
     }
   );
 
-  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken, GuestOrderIdempotency };
+  // Stock held for an unconfirmed order line (see services/inventory.service.js).
+  class InventoryReservation extends Model {}
+  InventoryReservation.init(
+    {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+      order_id: { type: DataTypes.INTEGER, allowNull: false },
+      variant_id: { type: DataTypes.INTEGER, allowNull: false },
+      quantity: { type: DataTypes.INTEGER, allowNull: false },
+      status: { type: DataTypes.ENUM('active', 'committed', 'released', 'expired', 'restocked'), allowNull: false, defaultValue: 'active' },
+      expires_at: { type: DataTypes.DATE, allowNull: false },
+    },
+    {
+      sequelize,
+      modelName: 'InventoryReservation',
+      tableName: 'inventory_reservations',
+      timestamps: true,
+      createdAt: 'created_at',
+      updatedAt: 'updated_at',
+    }
+  );
+
+  return { Order, OrderItem, OrderStatusHistory, OrderPaymentConfirmation, OrderPromoItem, GuestOrderToken, GuestOrderIdempotency, InventoryReservation };
 };
 
 module.exports.ORDER_STATUSES = ORDER_STATUSES;

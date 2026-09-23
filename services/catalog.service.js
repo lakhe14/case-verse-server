@@ -3,6 +3,7 @@
 const { Op } = require('sequelize');
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
+const inventory = require('./inventory.service');
 
 const productInclude = [
   { model: db.Category, as: 'category' },
@@ -21,15 +22,24 @@ const productInclude = [
   { model: db.ProductImage, as: 'images' },
 ];
 
-function shapeVariant(variant) {
+/**
+ * Stock semantics:
+ * - public (storefront) shape: stock_quantity is AVAILABLE to sell
+ *   (physical minus active reservations); reservation details are not exposed.
+ * - admin shape: stock_quantity is PHYSICAL (what the product form edits),
+ *   plus explicit reserved_quantity and available_quantity.
+ */
+function shapeVariant(variant, availability, { admin = false } = {}) {
+  const stock = availability?.get(variant.id) || { physical: variant.stock_quantity, reserved: 0, available: variant.stock_quantity };
   return {
     id: variant.id,
     sku: variant.sku,
     price: Number(variant.price),
     compare_at_price: variant.compare_at_price == null ? null : Number(variant.compare_at_price),
-    stock_quantity: variant.stock_quantity,
+    stock_quantity: admin ? stock.physical : stock.available,
+    ...(admin ? { reserved_quantity: stock.reserved, available_quantity: stock.available } : {}),
     is_active: variant.is_active,
-    in_stock: variant.stock_quantity > 0,
+    in_stock: stock.available > 0,
     attributes: (variant.attributeValues || []).map((av) => ({
       name: av.attribute?.name,
       attribute_id: av.attribute_id,
@@ -39,10 +49,10 @@ function shapeVariant(variant) {
   };
 }
 
-function shapeProduct(product, { publicOnly = true } = {}) {
+function shapeProduct(product, { publicOnly = true, availability } = {}) {
   const variants = (product.variants || [])
     .filter((v) => (publicOnly ? v.is_active : true))
-    .map(shapeVariant);
+    .map((v) => shapeVariant(v, availability, { admin: !publicOnly }));
   const prices = variants.map((v) => v.price);
   const comparePrices = variants.map((v) => v.compare_at_price).filter((price) => price != null);
   return {
@@ -67,6 +77,12 @@ function shapeProduct(product, { publicOnly = true } = {}) {
     created_at: product.created_at,
     updated_at: product.updated_at,
   };
+}
+
+/** Shapes products with reservation-aware stock (one availability query for the batch). */
+async function shapeProducts(products, { publicOnly = true } = {}) {
+  const availability = await inventory.availabilityFor(products.flatMap((p) => p.variants || []));
+  return products.map((p) => shapeProduct(p, { publicOnly, availability }));
 }
 
 async function listCategories() {
@@ -117,7 +133,7 @@ async function listProducts({ category, q, page = 1, limit = 20, sort = 'newest'
   });
 
   return {
-    data: rows.map((p) => shapeProduct(p, { publicOnly: !includeInactive })),
+    data: await shapeProducts(rows, { publicOnly: !includeInactive }),
     pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
   };
 }
@@ -127,7 +143,7 @@ async function getProductBySlug(slug, { includeInactive = false } = {}) {
   if (!product || (!includeInactive && product.status !== 'active')) {
     throw ApiError.notFound('Product not found', 'product_not_found');
   }
-  return shapeProduct(product, { publicOnly: !includeInactive });
+  return (await shapeProducts([product], { publicOnly: !includeInactive }))[0];
 }
 
 /**
@@ -164,12 +180,13 @@ async function listBestsellers({ limit = 8 } = {}) {
 
   const products = await db.Product.findAll({ where: { id: ids }, include: productInclude });
   const byId = new Map(products.map((p) => [p.id, p]));
-  return ids.map((id) => byId.get(id)).filter(Boolean).map((p) => shapeProduct(p, { publicOnly: true }));
+  return shapeProducts(ids.map((id) => byId.get(id)).filter(Boolean), { publicOnly: true });
 }
 
 module.exports = {
   productInclude,
   shapeProduct,
+  shapeProducts,
   shapeVariant,
   listCategories,
   getCategoryAttributes,

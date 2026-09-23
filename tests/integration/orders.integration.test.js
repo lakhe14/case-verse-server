@@ -1,7 +1,7 @@
 'use strict';
 
 const {
-  api, db, login, auth, SKU, variant, stockOf, clearCart, placeCustomerOrder, placeGuestOrder,
+  api, db, login, auth, SKU, variant, stockOf, inventoryOf, clearCart, placeCustomerOrder, placeGuestOrder,
 } = require('./helpers');
 
 afterAll(() => db.sequelize.close());
@@ -29,17 +29,17 @@ describe('stock arithmetic (DB-backed)', () => {
     await clearCart(customer);
   });
 
-  it('decrements on order, restocks exactly once on cancel, and refuses a second cancel', async () => {
-    const before = await stockOf(SKU.stockProbe);
+  it('reserves on order, releases on cancel without touching physical stock, and refuses a second cancel', async () => {
+    const before = await inventoryOf(SKU.stockProbe);
     const placed = await placeCustomerOrder('customerA', [{ sku: SKU.stockProbe, quantity: 2 }]);
     expect(placed.status).toBe(201);
-    expect(await stockOf(SKU.stockProbe)).toBe(before - 2);
+    expect(await inventoryOf(SKU.stockProbe)).toEqual({ physical: before.physical, reserved: before.reserved + 2, available: before.available - 2 });
 
     const customer = await login('customerA');
     const cancel = await api().post(`/api/orders/${placed.body.data.id}/cancel`).set(auth(customer));
     expect(cancel.status).toBe(200);
     expect(cancel.body.data.status).toBe('cancelled');
-    expect(await stockOf(SKU.stockProbe)).toBe(before);
+    expect(await inventoryOf(SKU.stockProbe)).toEqual(before);
 
     const again = await api().post(`/api/orders/${placed.body.data.id}/cancel`).set(auth(customer));
     expect(again.status).toBe(400);
@@ -48,20 +48,20 @@ describe('stock arithmetic (DB-backed)', () => {
     const staff = await login('staff');
     const staffCancel = await api().put(`/api/admin/orders/${placed.body.data.id}/status`).set(auth(staff)).send({ status: 'cancelled' });
     expect(staffCancel.status).toBe(200);
-    expect(await stockOf(SKU.stockProbe)).toBe(before);
+    expect(await inventoryOf(SKU.stockProbe)).toEqual(before);
     const history = await db.OrderStatusHistory.count({ where: { order_id: placed.body.data.id, status: 'cancelled' } });
     expect(history).toBe(1);
   });
 
-  it('guest cancellation restores stock once', async () => {
-    const before = await stockOf(SKU.flameSilver);
+  it('guest cancellation releases the hold once; physical stock never moves', async () => {
+    const before = await inventoryOf(SKU.flameSilver);
     const placed = await placeGuestOrder([{ sku: SKU.flameSilver, quantity: 1 }], { label: 'guest-cancel' });
     expect(placed.status).toBe(201);
-    expect(await stockOf(SKU.flameSilver)).toBe(before - 1);
+    expect(await inventoryOf(SKU.flameSilver)).toEqual({ ...before, reserved: before.reserved + 1, available: before.available - 1 });
     const token = placed.body.guest_token;
     expect((await api().post(`/api/guest-checkout/orders/${token}/cancel`)).status).toBe(200);
     expect((await api().post(`/api/guest-checkout/orders/${token}/cancel`)).status).toBe(400);
-    expect(await stockOf(SKU.flameSilver)).toBe(before);
+    expect(await inventoryOf(SKU.flameSilver)).toEqual(before);
   });
 });
 

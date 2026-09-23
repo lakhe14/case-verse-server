@@ -6,6 +6,7 @@ const { Op } = require('sequelize');
 const db = require('../models');
 const env = require('../config/env');
 const orderService = require('./order.service');
+const inventory = require('./inventory.service');
 const ApiError = require('../utils/ApiError');
 const { proofDir } = require('../middleware/paymentProofUpload');
 const { hashOpaqueToken } = require('../utils/tokens');
@@ -43,6 +44,8 @@ async function doUploadProof(order, confirmation, file, transaction) {
     throw ApiError.badRequest('This order is not eligible for a new payment proof.', 'payment_not_eligible');
   }
   const oldFile = confirmation.proof_filename;
+  // The customer has paid the advance: hold the stock through staff review.
+  await inventory.extendHold(order.id, { review: true }, transaction);
   await confirmation.update({ method: 'advance_qr', status: 'proof_uploaded', proof_filename: file.filename, admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
   if (oldFile && oldFile !== file.filename) {
     const oldPath = path.join(proofDir, path.basename(oldFile));
@@ -55,6 +58,8 @@ async function doRequestCod(order, confirmation, transaction) {
   if (order.status !== 'pending' || ['approved', 'cod_confirmed'].includes(confirmation.status)) {
     throw ApiError.badRequest('This order is not eligible for COD confirmation.', 'payment_not_eligible');
   }
+  // A COD request is not a confirmation: stock stays reserved, never deducted.
+  await inventory.extendHold(order.id, { review: true }, transaction);
   await confirmation.update({ method: 'whatsapp_cod', status: 'cod_pending', admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
   return confirmation;
 }
@@ -102,7 +107,7 @@ async function listQueue({ status, page = 1, limit = 20 } = {}) {
 }
 
 async function review(id, action, staffId, note) {
-  return db.sequelize.transaction(async (transaction) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const confirmation = await db.OrderPaymentConfirmation.findByPk(id, { include: includeOrder, lock: transaction.LOCK.UPDATE, transaction });
     if (!confirmation) throw ApiError.notFound('Payment confirmation not found', 'payment_confirmation_not_found');
     if (confirmation.order.status !== 'pending') {
@@ -111,6 +116,8 @@ async function review(id, action, staffId, note) {
     if (!['proof_uploaded', 'cod_pending'].includes(confirmation.status)) throw ApiError.badRequest('This payment confirmation has already been reviewed.', 'payment_already_reviewed');
     const isCod = confirmation.status === 'cod_pending';
     if (action === 'approve') {
+      // Confirmation is the only point where physical stock is deducted, exactly once.
+      await inventory.commitForOrder(confirmation.order_id, transaction);
       await confirmation.update({ status: isCod ? 'cod_confirmed' : 'approved', reviewed_by_staff_id: staffId, reviewed_at: new Date(), admin_note: note || null }, { transaction });
       await orderService.transitionOrderStatus(
         confirmation.order_id,
@@ -120,6 +127,9 @@ async function review(id, action, staffId, note) {
       );
     } else {
       if (isCod) throw ApiError.badRequest('COD requests can only be confirmed.', 'invalid_payment_review');
+      // Rejection is retryable (the customer may upload a new proof), so the
+      // hold stays but falls back to the unpaid window.
+      await inventory.extendHold(confirmation.order_id, { review: false }, transaction);
       await confirmation.update({ status: 'rejected', reviewed_by_staff_id: staffId, reviewed_at: new Date(), admin_note: note || 'Payment proof could not be verified.' }, { transaction });
     }
     return db.OrderPaymentConfirmation.findByPk(id, { include: includeOrder, transaction });
