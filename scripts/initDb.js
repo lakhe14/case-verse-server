@@ -17,7 +17,7 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const env = require('../config/env');
 
-const SCHEMA_PATH = path.resolve(__dirname, '..', '..', 'schema.sql');
+const SCHEMA_PATH = path.resolve(__dirname, '..', 'db', 'schema.sql');
 const DROP = process.argv.includes('--drop');
 
 function connectOptions(withDatabase) {

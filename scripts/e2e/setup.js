@@ -57,7 +57,7 @@ async function ensureDatabase(databaseName) {
     if (name !== databaseName) throw new Error('Connected to an unexpected database; aborting.');
     const [tables] = await conn.query('SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?', [databaseName]);
     if (tables[0].n === 0) {
-      await conn.query(fs.readFileSync(path.resolve(SERVER_ROOT, '..', 'schema.sql'), 'utf8'));
+      await conn.query(fs.readFileSync(path.resolve(SERVER_ROOT, 'db', 'schema.sql'), 'utf8'));
       return 'schema applied';
     }
     return 'schema already present';

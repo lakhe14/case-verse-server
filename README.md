@@ -26,8 +26,8 @@ npm run db:init
 npm run db:seed
 ```
 
-`db:init` creates the database when permitted and applies the sibling
-`../schema.sql` schema. `db:seed` creates RBAC roles, permissions, and safe demo
+`db:init` creates the database when permitted and applies the
+`db/schema.sql` schema (authoritative; the workspace-root copy is legacy). `db:seed` creates RBAC roles, permissions, and safe demo
 catalogue data without source-controlled account passwords.
 
 ## Local development accounts
