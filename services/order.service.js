@@ -22,8 +22,11 @@ const STATUS_FLOW = {
   cancelled: [],
 };
 
-async function loadCartLines(userId, transaction) {
-  const cart = await db.Cart.findOne({ where: { user_id: userId }, transaction });
+async function loadCartLines(userId, transaction, { lock = false } = {}) {
+  // Placement locks the cart row first: a concurrent second submission of the
+  // same cart waits here, then re-reads an emptied cart instead of creating a
+  // duplicate order from lines it had already loaded.
+  const cart = await db.Cart.findOne({ where: { user_id: userId }, transaction, ...(lock ? { lock: transaction.LOCK.UPDATE } : {}) });
   if (!cart) throw ApiError.badRequest('Cart is empty', 'cart_empty');
   const items = await db.CartItem.findAll({
     where: { cart_id: cart.id },
@@ -338,7 +341,7 @@ async function placeOrder(userId, payload) {
   const { shipping_address_id, billing_address_id, parcelmoover_destination_id, coupon_code, redeem_points } = payload;
 
   return db.sequelize.transaction(async (t) => {
-    const { cart, items } = await loadCartLines(userId, t);
+    const { cart, items } = await loadCartLines(userId, t, { lock: true });
 
     const shippingAddress = await requireOwnedAddress(userId, shipping_address_id, t);
     const billingAddress = billing_address_id
