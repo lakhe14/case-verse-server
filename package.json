@@ -15,7 +15,12 @@
     "db:remove-legacy-bags": "node scripts/removeLegacyBags.js",
     "dev:reset-accounts": "node scripts/resetDevAccounts.js",
     "test": "set NODE_ENV=test&& set DB_TEST_NAME=caseverse_unit_test&& jest --runInBand",
-    "test:integration": "set NODE_ENV=test&& jest --runInBand tests/integration --passWithNoTests"
+    "test:integration": "set NODE_ENV=e2e&& set E2E_ALLOW_DB_MUTATION=true&& node scripts/e2e/runIntegration.js",
+    "e2e:db:setup": "set NODE_ENV=e2e&& set E2E_ALLOW_DB_MUTATION=true&& node scripts/e2e/setup.js",
+    "e2e:db:cleanup": "set NODE_ENV=e2e&& set E2E_ALLOW_DB_MUTATION=true&& node scripts/e2e/cleanup.js --verify",
+    "e2e:db:reset": "set NODE_ENV=e2e&& set E2E_ALLOW_DB_MUTATION=true&& node scripts/e2e/reset.js --confirm-drop-e2e",
+    "e2e:server": "set NODE_ENV=e2e&& node scripts/e2e/server.js",
+    "e2e:server:fresh": "set NODE_ENV=e2e&& set E2E_ALLOW_DB_MUTATION=true&& node scripts/e2e/server.js --setup"
   },
   "keywords": [
     "ecommerce",
@@ -43,5 +48,12 @@
     "jest": "^29.7.0",
     "nodemon": "^3.1.4",
     "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/integration/"
+    ]
   }
 }

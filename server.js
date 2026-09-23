@@ -14,6 +14,9 @@ async function start() {
   }
 
   const server = app.listen(env.port, () => {
+    if (env.isE2e) {
+      console.info(`E2E MODE | database: ${env.db.name} | port: ${env.port} | shipping: ${env.parcelmooverStub ? 'e2e-stub' : 'live ParcelMoover'}`);
+    }
     console.info(`CaseVerse API listening on http://localhost:${env.port} (${env.nodeEnv})`);
   });
 

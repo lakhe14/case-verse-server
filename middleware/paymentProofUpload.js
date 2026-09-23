@@ -5,8 +5,9 @@ const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
 const ApiError = require('../utils/ApiError');
+const env = require('../config/env');
 
-const proofDir = path.resolve(__dirname, '..', 'private-uploads', 'payment-proofs');
+const proofDir = env.uploads.proofDir;
 fs.mkdirSync(proofDir, { recursive: true });
 
 const allowed = new Map([

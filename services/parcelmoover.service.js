@@ -1,6 +1,7 @@
 'use strict';
 
 const ApiError = require('../utils/ApiError');
+const env = require('../config/env');
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const DESTINATION_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -14,6 +15,7 @@ function pricingError(message, code) {
 function getConfiguration() {
   // Read server-only variables lazily: a missing key does not prevent server
   // startup, and it is never copied into an API response or client config.
+  if (env.parcelmooverStub) return require('./parcelmoover.e2eStub').configuration();
   const apiKey = process.env.PARCELMOOVER_API_KEY;
   const baseUrl = process.env.PARCELMOOVER_BASE_URL;
   const defaultWeightKg = Number(process.env.PARCELMOOVER_DEFAULT_WEIGHT_KG);
@@ -34,6 +36,8 @@ function getConfiguration() {
 }
 
 async function request(path, query = {}) {
+  // Test-only boundary stub; env.parcelmooverStub is false outside NODE_ENV=e2e.
+  if (env.parcelmooverStub) return require('./parcelmoover.e2eStub').respond(path, query);
   const { apiKey, baseUrl } = getConfiguration();
   if (typeof fetch !== 'function') throw pricingError(undefined, 'parcelmoover_unavailable');
 

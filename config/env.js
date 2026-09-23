@@ -4,7 +4,14 @@ const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
 
+const { assertE2eEnvironment, assertE2eDirectory, E2E_TMP_ROOT } = require('./e2eGuard');
+
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+
+const isE2e = process.env.NODE_ENV === 'e2e';
+// The isolated E2E environment never inherits DATABASE_URL: it must name an
+// *_e2e database explicitly, or the process refuses to start.
+if (isE2e) assertE2eEnvironment(process.env);
 
 function required(key, fallback) {
   const value = process.env[key] ?? fallback;
@@ -26,7 +33,7 @@ function resolveDbConfig() {
   if (isTest && !process.env.DB_TEST_NAME) {
     throw new Error('NODE_ENV=test requires DB_TEST_NAME (a dedicated test database)');
   }
-  const url = isTest ? process.env.DB_TEST_URL : process.env.DATABASE_URL;
+  const url = isTest ? process.env.DB_TEST_URL : isE2e ? process.env.E2E_DATABASE_URL : process.env.DATABASE_URL;
   let host, port, name, user, password;
   let sslFromUrl = false;
 
@@ -83,6 +90,7 @@ const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProd: (process.env.NODE_ENV || 'development') === 'production',
   isTest: process.env.NODE_ENV === 'test',
+  isE2e,
   port: parseInt(process.env.PORT || '4000', 10),
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
 
@@ -96,9 +104,18 @@ const env = {
   },
 
   uploads: {
-    dir: process.env.UPLOAD_DIR || 'uploads',
+    dir: isE2e ? assertE2eDirectory(path.resolve(__dirname, '..', process.env.UPLOAD_DIR || '.tmp/e2e-uploads'), 'UPLOAD_DIR') : process.env.UPLOAD_DIR || 'uploads',
     maxMb: parseInt(process.env.MAX_UPLOAD_MB || '5', 10),
+    // Private payment proofs. E2E runs are confined to server/.tmp so they can
+    // never read, write or delete files in the real private-uploads tree.
+    proofDir: isE2e
+      ? assertE2eDirectory(path.resolve(__dirname, '..', process.env.PRIVATE_UPLOAD_DIR || path.join(E2E_TMP_ROOT, 'e2e-payment-proofs')), 'PRIVATE_UPLOAD_DIR')
+      : path.resolve(__dirname, '..', 'private-uploads', 'payment-proofs'),
   },
+
+  // Deterministic, test-only ParcelMoover responses. Only honoured in the
+  // isolated E2E environment; every other environment calls the real provider.
+  parcelmooverStub: isE2e && process.env.PARCELMOOVER_MODE === 'e2e-stub',
 
   loyalty: {
     earnRate: parseFloat(process.env.LOYALTY_EARN_RATE || '0.02'),

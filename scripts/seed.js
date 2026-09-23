@@ -167,7 +167,12 @@ async function main() {
   await db.sequelize.close();
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Exported so the isolated E2E fixture setup seeds the exact same RBAC matrix.
+module.exports = { PERMISSIONS, ROLES, seedRbac };
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
