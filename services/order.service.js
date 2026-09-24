@@ -4,7 +4,7 @@ const { Op } = require('sequelize');
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { generateOrderNumber } = require('../utils/orderNumber');
-const { validateCoupon } = require('./coupon.service');
+const { validateCoupon, lockForRedemption, redeemForOrder } = require('./coupon.service');
 const parcelmoover = require('./parcelmoover.service');
 const { computeCoverBundle } = require('./bundle.service');
 const loyalty = require('./loyalty.service');
@@ -353,6 +353,11 @@ async function placeOrder(userId, payload) {
       ? await requireOwnedAddress(userId, billing_address_id, t)
       : shippingAddress;
 
+    // Placement lock order: cart, coupon, variants, then new rows (order,
+    // reservations, coupon use). The coupon comes before variants so an order
+    // waiting for a busy coupon holds no stock locks, and no other workflow
+    // locks a coupon row after variants (cancellation only flags usage rows).
+    if (coupon_code) await lockForRedemption(coupon_code, t);
     await lockVariantsForItems(items, t);
 
     const totals = await computeTotals(
@@ -398,13 +403,9 @@ async function placeOrder(userId, payload) {
       transaction: t,
     });
 
-    // Record coupon usage.
-    if (totals.coupon) {
-      await db.CouponUsage.create(
-        { coupon_id: totals.coupon.id, user_id: userId, order_id: order.id },
-        { transaction: t }
-      );
-    }
+    // Authoritative: limits re-checked under the coupon lock, use recorded in
+    // this transaction (rolled back with the order if anything later fails).
+    if (totals.coupon) await redeemForOrder({ couponId: totals.coupon.id, userId, orderId: order.id }, t);
 
     // Redeem loyalty points (negative ledger row).
     if (totals.points_redeemed > 0) {
@@ -489,8 +490,9 @@ async function getUserOrder(userId, orderId, transaction) {
  *   5. coupon usage / loyalty ledger rows of that order
  * Every path takes them in this order inside one transaction, so two
  * workflows on the same order wait for each other instead of deadlocking.
- * (Order placement locks variants first but only inserts new rows, which no
- * other transaction can hold yet.)
+ * Order placement is separate: it locks cart, coupon (when redeeming one),
+ * then variants, and only then inserts new rows, which no other transaction
+ * can hold yet. No lifecycle path locks a coupon or cart row.
  */
 async function lockOrderLifecycle(orderId, transaction, { orderWhere = {} } = {}) {
   const payment = await db.OrderPaymentConfirmation.findOne({ where: { order_id: orderId }, lock: transaction.LOCK.UPDATE, transaction });

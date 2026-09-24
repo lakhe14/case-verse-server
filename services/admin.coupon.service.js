@@ -12,7 +12,9 @@ async function list({ page = 1, limit = 20 } = {}) {
   const withUsage = await Promise.all(
     rows.map(async (c) => ({
       ...c.get({ plain: true }),
+      // Active uses count toward limits; released ones (unpaid order cancelled) do not.
       times_used: await db.CouponUsage.count({ where: { coupon_id: c.id, released_at: null } }),
+      times_released: await db.CouponUsage.count({ where: { coupon_id: c.id, released_at: { [db.Sequelize.Op.ne]: null } } }),
     }))
   );
   return { data: withUsage, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } };

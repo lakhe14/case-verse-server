@@ -25,6 +25,12 @@ function errorHandler(err, req, res, next) {
     status = 409;
     code = 'conflict';
     message = 'This record is referenced by other records and cannot be changed this way.';
+  } else if (err && ['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT'].includes(err.parent?.code || err.original?.code)) {
+    // A concurrent checkout or review won the row lock; the whole transaction
+    // rolled back, so retrying is safe. Never echo lock or SQL details.
+    status = 409;
+    code = 'retry_conflict';
+    message = 'Another update was in progress. Please try again.';
   } else if (err && err.name === 'SequelizeValidationError') {
     status = 422;
     code = 'validation_failed';
