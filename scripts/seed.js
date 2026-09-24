@@ -8,6 +8,7 @@
  */
 
 const db = require('../models');
+const cache = require('../services/cache.service');
 const { slugify } = require('../utils/slug');
 
 const PERMISSIONS = [
@@ -163,6 +164,9 @@ async function main() {
   await seedRbac();
   await seedCatalog();
   await seedSettingsAndCoupons();
+  // Catalog changed: drop the public read cache (no-op when Redis is not configured).
+  await cache.invalidateCatalog();
+  await cache.close();
   console.info('Done.');
   await db.sequelize.close();
 }

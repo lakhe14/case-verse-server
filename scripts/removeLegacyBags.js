@@ -7,6 +7,7 @@
  */
 const { Op } = require('sequelize');
 const db = require('../models');
+const cache = require('../services/cache.service');
 
 const LEGACY_CATEGORY_SLUG = 'ladies-bags';
 const LEGACY_ATTRIBUTE_NAMES = ['Material', 'Style'];
@@ -56,6 +57,8 @@ async function main() {
 
   console.info(`Removed ${deleted} legacy product(s); archived ${archived} product(s) with order history.`);
   if (remainingProducts) console.info('The legacy category remains only to preserve foreign-key-linked order history.');
+  // Catalog changed: drop the public read cache (no-op when Redis is not configured).
+  await cache.invalidateCatalog();
 }
 
 main()
@@ -63,4 +66,4 @@ main()
     console.error(error);
     process.exitCode = 1;
   })
-  .finally(() => db.sequelize.close());
+  .finally(async () => { await cache.close(); await db.sequelize.close(); });

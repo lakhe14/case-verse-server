@@ -94,6 +94,8 @@ async function main() {
   const fixtures = require('./fixtures');
   try {
     const seeded = await fixtures.seedAll();
+    // Only reaches Redis when E2E_REDIS_URL is set (never the dev REDIS_URL).
+    await require('../../services/cache.service').invalidateCatalog();
     const stale = await fixtures.cleanup();
     const state = await fixtures.verify();
     console.info(`E2E setup | accounts: ${seeded.accounts.join(', ')}`);
@@ -103,6 +105,7 @@ async function main() {
     console.info(`E2E setup | proof dir: ${require('path').relative(SERVER_ROOT, proofDir)}`);
     if (!fixtures.isClean(state)) throw new Error('Fixture state is not clean after setup');
   } finally {
+    await require('../../services/cache.service').close();
     await db.sequelize.close();
   }
 }

@@ -5,6 +5,7 @@ const ApiError = require('../utils/ApiError');
 const { slugify } = require('../utils/slug');
 const { productInclude, shapeProducts } = require('./catalog.service');
 const inventory = require('./inventory.service');
+const cache = require('./cache.service');
 
 /* ------------------------------ Categories ------------------------------ */
 
@@ -243,16 +244,27 @@ async function adminListProducts({ page = 1, limit = 20, q, status } = {}) {
   };
 }
 
+// Every catalog write invalidates the public catalog cache once it has
+// committed (each function below finishes its own transaction first), so the
+// next storefront read sees it: details (old and new slug), lists, categories
+// and cached "not found" markers alike. A failed write invalidates nothing.
+const invalidatesCatalog = (fn) => async (...args) => {
+  const result = await fn(...args);
+  await cache.invalidateCatalog();
+  return result;
+};
+
 module.exports = {
-  createCategory,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  createVariant,
-  updateVariant,
-  deleteVariant,
-  addImages,
-  deleteImage,
+  createCategory: invalidatesCatalog(createCategory),
+  createProduct: invalidatesCatalog(createProduct),
+  updateProduct: invalidatesCatalog(updateProduct),
+  deleteProduct: invalidatesCatalog(deleteProduct),
+  createVariant: invalidatesCatalog(createVariant),
+  updateVariant: invalidatesCatalog(updateVariant),
+  deleteVariant: invalidatesCatalog(deleteVariant),
+  addImages: invalidatesCatalog(addImages),
+  deleteImage: invalidatesCatalog(deleteImage),
   loadProduct,
   adminListProducts,
+  invalidatesCatalog,
 };
