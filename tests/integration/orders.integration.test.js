@@ -65,6 +65,19 @@ describe('stock arithmetic (DB-backed)', () => {
   });
 });
 
+describe('guest orders never store a position', () => {
+  it('drops latitude/longitude sent by an older client and persists address fields only', async () => {
+    const placed = await placeGuestOrder([{ sku: SKU.flameSilver, quantity: 1 }], { label: 'no-position', guestExtra: { latitude: 27.7215678, longitude: 85.3381234 } });
+    expect(placed.status).toBe(201);
+    const order = await db.Order.findByPk(placed.body.data.id);
+    expect(order.guest_latitude).toBeNull();
+    expect(order.guest_longitude).toBeNull();
+    expect(order.guest_municipality).toBeTruthy();
+    expect(JSON.stringify(placed.body)).not.toMatch(/27\.72|85\.33/);
+    expect((await api().post(`/api/guest-checkout/orders/${placed.body.guest_token}/cancel`)).status).toBe(200);
+  });
+});
+
 describe('server-authoritative pricing', () => {
   it('ignores forged customer totals and persists the computed amounts', async () => {
     const customer = await login('customerA');
