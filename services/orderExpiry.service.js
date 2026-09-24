@@ -82,13 +82,17 @@ async function candidateIds({ afterId, limit, now }) {
 }
 
 async function loadState(orderId, transaction) {
-  const lock = transaction ? transaction.LOCK.UPDATE : undefined;
-  // Same lock order as payment review (confirmation row, then order), so a
-  // staff approval racing this run waits instead of deadlocking.
-  const payment = await db.OrderPaymentConfirmation.findOne({ where: { order_id: orderId }, lock, transaction });
-  const order = await db.Order.findByPk(orderId, { lock, transaction });
+  let payment;
+  let order;
+  if (transaction) {
+    // Canonical lifecycle lock order: confirmation, order, then reservations.
+    ({ payment, order } = await orderService.lockOrderLifecycle(orderId, transaction));
+  } else {
+    payment = await db.OrderPaymentConfirmation.findOne({ where: { order_id: orderId } });
+    order = await db.Order.findByPk(orderId);
+  }
   if (!order) return null;
-  const reservations = await db.InventoryReservation.findAll({ where: { order_id: orderId }, lock, transaction });
+  const reservations = await db.InventoryReservation.findAll({ where: { order_id: orderId }, lock: transaction ? transaction.LOCK.UPDATE : undefined, transaction });
   return { order, payment, reservations };
 }
 

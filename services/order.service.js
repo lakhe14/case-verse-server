@@ -478,14 +478,36 @@ async function getUserOrder(userId, orderId, transaction) {
   return shapeOrder(order);
 }
 
+/**
+ * Canonical lock order for every order-lifecycle write (customer, guest and
+ * staff cancellation, status changes, proof upload, COD request, payment
+ * review, stale-order cancellation):
+ *   1. order_payment_confirmations row
+ *   2. orders row (with its order_items)
+ *   3. inventory_reservations rows   (inventory.service)
+ *   4. product_variants rows         (inventory.service)
+ *   5. coupon usage / loyalty ledger rows of that order
+ * Every path takes them in this order inside one transaction, so two
+ * workflows on the same order wait for each other instead of deadlocking.
+ * (Order placement locks variants first but only inserts new rows, which no
+ * other transaction can hold yet.)
+ */
+async function lockOrderLifecycle(orderId, transaction, { orderWhere = {} } = {}) {
+  const payment = await db.OrderPaymentConfirmation.findOne({ where: { order_id: orderId }, lock: transaction.LOCK.UPDATE, transaction });
+  const order = await db.Order.findOne({
+    where: { ...orderWhere, id: orderId },
+    include: [{ model: db.OrderItem, as: 'items' }],
+    lock: transaction.LOCK.UPDATE,
+    transaction,
+  });
+  return { payment, order };
+}
+
 /** Shared pending/payment-state eligibility check for customer and guest self-cancellation. */
-async function assertSelfCancellable(order, transaction) {
+function assertSelfCancellable(order, payment) {
   if (order.status !== 'pending') {
     throw ApiError.badRequest('Only pending orders can be cancelled.', 'order_not_cancellable');
   }
-  const payment = await db.OrderPaymentConfirmation.findOne({
-    where: { order_id: order.id }, lock: transaction.LOCK.UPDATE, transaction,
-  });
   const cancellablePayment = !payment || ['pending', 'proof_uploaded', 'rejected', 'cod_pending'].includes(payment.status);
   if (!cancellablePayment) {
     throw ApiError.badRequest('This order can no longer be cancelled after payment confirmation.', 'order_not_cancellable');
@@ -494,14 +516,10 @@ async function assertSelfCancellable(order, transaction) {
 
 /** Customer cancellation is intentionally restricted to unconfirmed pending orders. */
 async function cancelUserOrder(userId, orderId) {
-  return db.sequelize.transaction(async (transaction) => {
-    const order = await db.Order.findOne({
-      where: { id: orderId, user_id: userId },
-      lock: transaction.LOCK.UPDATE,
-      transaction,
-    });
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
+    const { payment, order } = await lockOrderLifecycle(orderId, transaction, { orderWhere: { user_id: userId } });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-    await assertSelfCancellable(order, transaction);
+    assertSelfCancellable(order, payment);
     return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation', cancellationReason: 'customer' }, null, transaction);
   });
 }
@@ -686,16 +704,12 @@ async function getGuestOrder(token, transaction) {
 }
 
 async function cancelGuestOrder(token) {
-  return db.sequelize.transaction(async (transaction) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const orderId = await resolveGuestToken(token, transaction);
     if (!orderId) throw ApiError.notFound('Order not found', 'order_not_found');
-    const order = await db.Order.findOne({
-      where: { id: orderId, user_id: null },
-      lock: transaction.LOCK.UPDATE,
-      transaction,
-    });
+    const { payment, order } = await lockOrderLifecycle(orderId, transaction, { orderWhere: { user_id: null } });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-    await assertSelfCancellable(order, transaction);
+    assertSelfCancellable(order, payment);
     return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by guest before payment confirmation', cancellationReason: 'guest' }, null, transaction);
   });
 }
@@ -759,11 +773,7 @@ async function transitionOrderStatus(orderId, { status, note, cancellationReason
   const reason = status === 'cancelled' ? cancellationReason || (staffId ? 'staff' : null) : null;
   if (reason && !CANCELLATION_REASONS.includes(reason)) throw new Error(`Unknown cancellation reason: ${reason}`);
   const transition = async (t) => {
-    const order = await db.Order.findByPk(orderId, {
-      include: [{ model: db.OrderItem, as: 'items' }],
-      lock: t.LOCK.UPDATE,
-      transaction: t,
-    });
+    const { payment, order } = await lockOrderLifecycle(orderId, t);
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
     if (order.status === status) return adminGetOrder(orderId, t);
 
@@ -780,11 +790,6 @@ async function transitionOrderStatus(orderId, { status, note, cancellationReason
     // before this feature intentionally have no record and retain their
     // historical workflow rather than being retroactively blocked.
     if (['processing', 'shipped', 'delivered'].includes(status)) {
-      const payment = await db.OrderPaymentConfirmation.findOne({
-        where: { order_id: order.id },
-        lock: t.LOCK.UPDATE,
-        transaction: t,
-      });
       const confirmed = payment && (
         (payment.method === 'advance_qr' && payment.status === 'approved') ||
         (payment.method === 'whatsapp_cod' && payment.status === 'cod_confirmed')
@@ -824,7 +829,7 @@ async function transitionOrderStatus(orderId, { status, note, cancellationReason
 
     return adminGetOrder(orderId, t);
   };
-  return transaction ? transition(transaction) : db.sequelize.transaction(transition);
+  return transaction ? transition(transaction) : db.sequelize.transaction(inventory.STOCK_TX, transition);
 }
 
 async function updateOrderStatus(orderId, payload, staffId) {
@@ -846,6 +851,7 @@ module.exports = {
   cancelGuestOrder,
   adminListOrders,
   adminGetOrder,
+  lockOrderLifecycle,
   reviewSlaMs,
   isReviewOverdue,
   transitionOrderStatus,

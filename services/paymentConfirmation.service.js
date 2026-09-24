@@ -13,10 +13,13 @@ const { hashOpaqueToken } = require('../utils/tokens');
 
 const includeOrder = [{ model: db.Order, as: 'order', where: { status: 'pending' }, required: true, include: [{ model: db.User, as: 'user', attributes: ['id', 'name', 'email'] }] }];
 
+// Staff review needs the order row whatever its status, to tell a cancelled order apart.
+const includeOrderAnyStatus = [{ model: db.Order, as: 'order', include: [{ model: db.User, as: 'user', attributes: ['id', 'name', 'email'] }] }];
+
 async function ownedConfirmation(userId, orderId, transaction) {
-  const order = await db.Order.findOne({ where: { id: orderId, user_id: userId }, transaction });
-  if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-  return findOrCreateConfirmation(order, transaction);
+  const owned = await db.Order.findOne({ where: { id: orderId, user_id: userId }, attributes: ['id'], transaction });
+  if (!owned) throw ApiError.notFound('Order not found', 'order_not_found');
+  return lockedConfirmation(owned.id, transaction);
 }
 
 /** Same resolution as ownedConfirmation, but ownership is a guest access token, not a signed-in user_id. The token alone determines the order — no order id is ever taken from the request. */
@@ -24,13 +27,15 @@ async function ownedConfirmationForGuest(token, transaction) {
   const tokenHash = hashOpaqueToken(token);
   const tokenRow = await db.GuestOrderToken.findOne({ where: { token_hash: tokenHash }, transaction });
   if (!tokenRow) throw ApiError.notFound('Order not found', 'order_not_found');
-  const order = await db.Order.findOne({ where: { id: tokenRow.order_id, user_id: null }, transaction });
-  if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-  return findOrCreateConfirmation(order, transaction);
+  const owned = await db.Order.findOne({ where: { id: tokenRow.order_id, user_id: null }, attributes: ['id'], transaction });
+  if (!owned) throw ApiError.notFound('Order not found', 'order_not_found');
+  return lockedConfirmation(owned.id, transaction);
 }
 
-async function findOrCreateConfirmation(order, transaction) {
-  let confirmation = await db.OrderPaymentConfirmation.findOne({ where: { order_id: order.id }, transaction });
+/** Locks confirmation then order (orderService.lockOrderLifecycle); creates the confirmation for a legacy order. */
+async function lockedConfirmation(orderId, transaction) {
+  const { payment, order } = await orderService.lockOrderLifecycle(orderId, transaction);
+  let confirmation = payment;
   if (!confirmation) {
     confirmation = await db.OrderPaymentConfirmation.create({ order_id: order.id, method: 'advance_qr', advance_amount: env.payment.advanceAmount, status: 'pending' }, { transaction });
   }
@@ -70,14 +75,14 @@ async function doRequestCod(order, confirmation, transaction) {
 
 async function uploadProof(userId, orderId, file) {
   if (!file) throw ApiError.badRequest('Select a payment screenshot first.', 'payment_proof_required');
-  return db.sequelize.transaction(async (transaction) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const { order, confirmation } = await ownedConfirmation(userId, orderId, transaction);
     return doUploadProof(order, confirmation, file, transaction);
   });
 }
 
 async function requestCod(userId, orderId) {
-  return db.sequelize.transaction(async (transaction) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const { order, confirmation } = await ownedConfirmation(userId, orderId, transaction);
     return doRequestCod(order, confirmation, transaction);
   });
@@ -87,14 +92,14 @@ async function requestCod(userId, orderId) {
 
 async function uploadProofGuest(token, file) {
   if (!file) throw ApiError.badRequest('Select a payment screenshot first.', 'payment_proof_required');
-  return db.sequelize.transaction(async (transaction) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const { order, confirmation } = await ownedConfirmationForGuest(token, transaction);
     return doUploadProof(order, confirmation, file, transaction);
   });
 }
 
 async function requestCodGuest(token) {
-  return db.sequelize.transaction(async (transaction) => {
+  return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const { order, confirmation } = await ownedConfirmationForGuest(token, transaction);
     return doRequestCod(order, confirmation, transaction);
   });
@@ -114,10 +119,16 @@ async function listQueue({ status, page = 1, limit = 20 } = {}) {
 
 async function review(id, action, staffId, note) {
   return db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
-    const confirmation = await db.OrderPaymentConfirmation.findByPk(id, { include: includeOrder, lock: transaction.LOCK.UPDATE, transaction });
-    if (!confirmation) throw ApiError.notFound('Payment confirmation not found', 'payment_confirmation_not_found');
-    if (confirmation.order.status !== 'pending') {
-      throw ApiError.badRequest('Cancelled or fulfilled orders cannot be reviewed for payment.', 'payment_not_eligible');
+    // Plain read for the order id only; the rows are then locked in the canonical order.
+    const found = await db.OrderPaymentConfirmation.findByPk(id, { attributes: ['id', 'order_id'], transaction });
+    if (!found) throw ApiError.notFound('Payment confirmation not found', 'payment_confirmation_not_found');
+    const { payment: confirmation, order } = await orderService.lockOrderLifecycle(found.order_id, transaction);
+    if (!order) throw ApiError.notFound('Payment confirmation not found', 'payment_confirmation_not_found');
+    if (order.status === 'cancelled') {
+      throw new ApiError(409, 'This order has already been cancelled and its payment confirmation can no longer be reviewed.', 'order_cancelled');
+    }
+    if (order.status !== 'pending') {
+      throw ApiError.badRequest('Fulfilled orders cannot be reviewed for payment.', 'payment_not_eligible');
     }
     if (!['proof_uploaded', 'cod_pending'].includes(confirmation.status)) throw ApiError.badRequest('This payment confirmation has already been reviewed.', 'payment_already_reviewed');
     const isCod = confirmation.status === 'cod_pending';
@@ -138,7 +149,7 @@ async function review(id, action, staffId, note) {
       await inventory.setHoldDeadline(confirmation.order_id, 'retry', transaction);
       await confirmation.update({ status: 'rejected', reviewed_by_staff_id: staffId, reviewed_at: new Date(), admin_note: note || 'Payment proof could not be verified.' }, { transaction });
     }
-    return db.OrderPaymentConfirmation.findByPk(id, { include: includeOrder, transaction });
+    return db.OrderPaymentConfirmation.findByPk(id, { include: includeOrderAnyStatus, transaction });
   });
 }
 
