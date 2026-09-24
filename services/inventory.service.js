@@ -191,6 +191,25 @@ async function setPhysicalStock(variantId, quantity, transaction) {
   return { physical: variant.stock_quantity, reserved, available: Math.max(variant.stock_quantity - reserved, 0) };
 }
 
+/**
+ * Catalog imports set physical stock from an external source of truth. They
+ * must not undercut active holds either: this lists every requested change
+ * that would go below its variant's active reserved quantity, so the importer
+ * can refuse the whole import and report the SKUs. Unchanged values never
+ * conflict. requests: [{ variant, quantity }] with loaded variant instances.
+ */
+async function findStockFloorConflicts(requests, { transaction } = {}) {
+  const reserved = await reservedByVariant(requests.map((r) => r.variant.id), { transaction });
+  return requests
+    .filter(({ variant, quantity }) => quantity !== variant.stock_quantity && quantity < reserved.get(variant.id))
+    .map(({ variant, quantity }) => ({
+      sku: variant.sku,
+      requested_physical_stock: quantity,
+      reserved_quantity: reserved.get(variant.id),
+      minimum_allowed_stock: reserved.get(variant.id),
+    }));
+}
+
 /* ------------------------------- Retention ------------------------------- */
 
 const days = (value, fallback) => {
@@ -285,6 +304,7 @@ module.exports = {
   releaseForOrder,
   restockLegacyItems,
   setPhysicalStock,
+  findStockFloorConflicts,
   retentionDays,
   pruneTerminalReservations,
   expireStale,

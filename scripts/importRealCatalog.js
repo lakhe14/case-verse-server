@@ -7,6 +7,13 @@
  * this script was written. It intentionally contains no customer/order data and
  * does not read or copy the source workbook into this repository.
  *
+ * Stock is an authoritative import, but it never goes below what unpaid
+ * orders hold: if any existing variant would be set below its active reserved
+ * quantity, nothing is imported and the conflicting SKUs are reported (also in
+ * --dry-run). Existing variants' stock is written through
+ * inventory.setPhysicalStock inside a locked transaction, so a hold placed
+ * during the import rolls the whole import back instead of undercutting it.
+ *
  * Usage: node scripts/importRealCatalog.js [--dry-run]
  */
 
@@ -14,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { Op } = require('sequelize');
 const db = require('../models');
+const inventory = require('../services/inventory.service');
 const { slugify } = require('../utils/slug');
 
 const CATEGORY_SLUG = 'iphone-covers';
@@ -99,6 +107,29 @@ async function findVariant(productId, attributeId, model, transaction) {
   });
 }
 
+/** Existing variants whose imported stock would be below their active reserved quantity. */
+async function reservationConflicts() {
+  const attribute = await db.Attribute.findOne({ where: { name: PHONE_MODEL } });
+  if (!attribute) return [];
+  const requests = [];
+  for (const item of CATALOG) {
+    const product = await db.Product.findOne({ where: { slug: slugify(item.name) } });
+    if (!product) continue;
+    for (const [model, stock] of item.variants) {
+      const variant = await findVariant(product.id, attribute.id, model);
+      if (variant) requests.push({ variant, quantity: stock });
+    }
+  }
+  return inventory.findStockFloorConflicts(requests);
+}
+
+function reportConflicts(conflicts) {
+  console.error(`Import blocked: ${conflicts.length} variant(s) would go below stock reserved by pending orders. Nothing was changed.`);
+  for (const c of conflicts) {
+    console.error(`  ${c.sku}: requested ${c.requested_physical_stock}, reserved ${c.reserved_quantity}, minimum allowed ${c.minimum_allowed_stock}`);
+  }
+}
+
 async function deactivateSafeDemoProducts(transaction) {
   const products = await db.Product.findAll({ where: { name: { [Op.in]: DEMO_PRODUCTS } }, transaction });
   let deactivated = 0;
@@ -142,10 +173,16 @@ async function main() {
   db.sequelize.options.logging = false;
   await db.sequelize.authenticate();
   console.info(`Validated ${invariant.variants} rows: ${invariant.products} products, ${invariant.stock} total stock.`);
+  const conflicts = await reservationConflicts();
+  if (conflicts.length) {
+    reportConflicts(conflicts);
+    process.exitCode = 1;
+    return;
+  }
   if (dryRun) return;
 
   const backupPath = await writeBackup();
-  const result = await db.sequelize.transaction(async (transaction) => {
+  const result = await db.sequelize.transaction(inventory.STOCK_TX, async (transaction) => {
     const category = await db.Category.findOne({ where: { slug: CATEGORY_SLUG }, transaction });
     if (!category) throw new Error(`Category "${CATEGORY_SLUG}" is required before import.`);
     const [phoneModelAttribute] = await db.Attribute.findOrCreate({ where: { name: PHONE_MODEL }, defaults: { name: PHONE_MODEL }, transaction });
@@ -173,7 +210,16 @@ async function main() {
           await db.VariantAttributeValue.create({ variant_id: variant.id, attribute_id: phoneModelAttribute.id, value: model }, { transaction });
           createdVariants += 1;
         } else {
-          await variant.update({ price: PRICE, compare_at_price: COMPARE_AT_PRICE, stock_quantity: stock, is_active: true }, { transaction });
+          await variant.update({ price: PRICE, compare_at_price: COMPARE_AT_PRICE, is_active: true }, { transaction });
+          // Locks the variant and refuses to go below active holds (stock_below_reserved rolls back everything).
+          try {
+            await inventory.setPhysicalStock(variant.id, stock, transaction);
+          } catch (error) {
+            if (error.code === 'stock_below_reserved') {
+              error.message = `Import blocked: ${variant.sku}: requested ${stock}, reserved ${error.details.reserved_quantity}, minimum allowed ${error.details.minimum_allowed_stock}. Nothing was changed.`;
+            }
+            throw error;
+          }
         }
       }
     }
