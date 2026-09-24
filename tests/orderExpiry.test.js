@@ -18,21 +18,33 @@ describe('staleUnpaidDecision', () => {
     expect(decide(order(), payment('pending'), [hold('expired', minutesAgo(90))]).eligible).toBe(true);
   });
 
-  it('cancels proof_uploaded, cod_pending and rejected orders once their window lapsed', () => {
-    for (const status of ['proof_uploaded', 'cod_pending', 'rejected']) {
+  it('cancels cod_pending and rejected orders once their window lapsed', () => {
+    for (const status of ['cod_pending', 'rejected']) {
       expect(decide(order(), payment(status, hoursAgo(73)), lapsed).eligible).toBe(true);
     }
   });
 
+  it('never cancels a proof awaiting staff review, however old', () => {
+    const review = [hold('active', null)];
+    for (const age of [hoursAgo(1), hoursAgo(73), hoursAgo(24 * 30)]) {
+      expect(decide(order(), payment('proof_uploaded', age), review)).toEqual({ eligible: false, reason: 'awaiting_staff_review' });
+      // Even a hold that lapsed before the upload could not be revived.
+      expect(decide(order(), payment('proof_uploaded', age), lapsed).reason).toBe('awaiting_staff_review');
+    }
+  });
+
+  it('treats a hold without a deadline as live', () => {
+    expect(decide(order(), payment('pending'), [hold('active', null)]).reason).toBe('hold_active');
+  });
+
   it('keeps any order whose hold is still live', () => {
     const live = [hold('active', minutesAgo(-10))];
-    for (const status of ['pending', 'proof_uploaded', 'cod_pending', 'rejected']) {
+    for (const status of ['pending', 'cod_pending', 'rejected']) {
       expect(decide(order(), payment(status), live)).toEqual({ eligible: false, reason: 'hold_active' });
     }
   });
 
-  it('gives a proof or COD request made after the hold lapsed its full review window', () => {
-    expect(decide(order(), payment('proof_uploaded', hoursAgo(71)), lapsed).reason).toBe('recent_payment_activity');
+  it('gives a COD request or rejection made after the hold lapsed its own window', () => {
     expect(decide(order(), payment('cod_pending', hoursAgo(71)), lapsed).reason).toBe('recent_payment_activity');
     expect(decide(order(), payment('rejected', minutesAgo(30)), lapsed).reason).toBe('recent_payment_activity');
   });

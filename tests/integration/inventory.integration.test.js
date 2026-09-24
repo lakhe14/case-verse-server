@@ -71,7 +71,8 @@ describe('advance payment', () => {
     await uploadProof(orderId);
     expect(await inventoryOf(SKU.chetah14)).toEqual({ physical: before.physical, reserved: before.reserved + 2, available: before.available - 2 });
     const [held] = await holdsFor(orderId);
-    expect(held.expires_at.getTime() - Date.now()).toBeGreaterThan(71 * 60 * 60 * 1000);
+    // Waiting on staff review: the hold has no deadline.
+    expect(held).toMatchObject({ status: 'active', expires_at: null });
 
     expect((await approve(orderId)).status).toBe(200);
     expect(await inventoryOf(SKU.chetah14)).toEqual({ physical: before.physical - 2, reserved: before.reserved, available: before.available - 2 });

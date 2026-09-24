@@ -66,8 +66,9 @@ describe('real payment proof lifecycle', () => {
     expect(history.map((h) => h.status)).toEqual(['pending', 'processing']);
 
     const again = await api().post(`/api/admin/payment-confirmations/${confirmation.id}/approve`).set(auth(staff)).send({});
-    // The order is now processing, so it has left the review scope: a second review is refused.
-    expect(again.status).toBe(404);
+    // The order is now processing: a second review is refused.
+    expect(again.status).toBe(400);
+    expect(again.body.error.code).toBe('payment_not_eligible');
     expect((await confirmationFor(order.id)).status).toBe('approved');
     const customerView = await api().get(`/api/orders/${order.id}`).set(auth(customer));
     expect(customerView.body.data.paymentConfirmation.status).toBe('approved');
@@ -183,8 +184,9 @@ describe('COD request and confirmation', () => {
     const confirmation = await confirmationFor(order.id);
     expect(confirmation.status).toBe('cod_pending');
     const res = await api().post(`/api/admin/payment-confirmations/${confirmation.id}/approve`).set(auth(await login('staff'))).send({});
-    // Cancelled orders drop out of the review scope entirely.
-    expect(res.status).toBe(404);
+    // The record exists: a clear conflict, not an ambiguous 404.
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'order_cancelled', message: 'This order has already been cancelled and its payment confirmation can no longer be reviewed.' });
     expect((await confirmationFor(order.id)).status).toBe('cod_pending');
     expect((await db.Order.findByPk(order.id)).status).toBe('cancelled');
   });

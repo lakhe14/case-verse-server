@@ -81,33 +81,8 @@ describe('pending (unpaid) orders', () => {
   });
 });
 
-describe('advance proof', () => {
-  it('B: proof uploaded, review hold still valid: kept', async () => {
-    const { id, token } = await guestOrder('exp-proof-live');
-    expect((await api().post(`/api/guest-checkout/orders/${token}/payment-proof`).attach('proof', PNG, { filename: 'p.png', contentType: 'image/png' })).status).toBe(200);
-    await expectKept(id, 'hold_active');
-    expect((await confirmationFor(id)).status).toBe('proof_uploaded');
-  });
-
-  it('C: proof uploaded, review hold expired without staff action: cancelled', async () => {
-    const before = await inventoryOf(sku);
-    const { id, token } = await guestOrder('exp-proof-lapsed');
-    await api().post(`/api/guest-checkout/orders/${token}/payment-proof`).attach('proof', PNG, { filename: 'p.png', contentType: 'image/png' });
-    await lapse(id, 73 * HOUR);
-    expect(await cancelIfStale(id)).toBe('cancelled');
-    await expectCancelledByTimeout(id);
-    // The uploaded proof record is kept for the history.
-    expect(await confirmationFor(id)).toMatchObject({ status: 'proof_uploaded' });
-    expect(await inventoryOf(sku)).toEqual(before);
-  });
-
-  it('a proof uploaded after the hold lapsed still gets its review window', async () => {
-    const { id, token } = await guestOrder('exp-proof-late');
-    await lapse(id, 2 * HOUR);
-    await api().post(`/api/guest-checkout/orders/${token}/payment-proof`).attach('proof', PNG, { filename: 'p.png', contentType: 'image/png' });
-    await expectKept(id, 'recent_payment_activity');
-  });
-
+// proof_uploaded (waiting on staff) is covered in proofReview.integration.test.js.
+describe('rejected proof', () => {
   it('F: rejected proof inside its retry window: kept', async () => {
     const { id, token } = await guestOrder('exp-rejected-live');
     await api().post(`/api/guest-checkout/orders/${token}/payment-proof`).attach('proof', PNG, { filename: 'p.png', contentType: 'image/png' });

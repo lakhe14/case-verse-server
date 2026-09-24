@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * E2E-only time travel for one fixture order: makes its stock hold and last
- * payment activity old enough to lapse, then runs the payment-timeout
- * cancellation for that order. Lets browser tests exercise the timeout path
- * without waiting 60 minutes.
+ * E2E-only time travel for one fixture order, then the payment-timeout check
+ * for that order, so browser tests need not wait:
+ *   default            the stock hold and last payment activity lapse
+ *   --age-proof=HOURS  only the payment proof gets older (its hold is left
+ *                      alone): a proof awaiting review must never be cancelled
  *
- * NODE_ENV=e2e E2E_ALLOW_DB_MUTATION=true node scripts/e2e/expireOrder.js --order-id=123
+ * NODE_ENV=e2e E2E_ALLOW_DB_MUTATION=true node scripts/e2e/expireOrder.js --order-id=123 [--age-proof=80]
  *
  * Refuses outside the guarded *_e2e database and for any order that is not an
  * E2E fixture order. Prints only the order id and the decision.
@@ -35,9 +36,12 @@ async function main() {
     const order = await db.Order.findOne({ where: { [Op.and]: [{ id: orderId }, scope] } });
     if (!order) throw new Error(`Order ${orderId} is not an E2E fixture order`);
 
-    await db.InventoryReservation.update({ expires_at: new Date(Date.now() - 1000) }, { where: { order_id: orderId } });
+    const ageArg = process.argv.find((a) => a.startsWith('--age-proof='));
+    const proofHours = ageArg ? Number(ageArg.slice('--age-proof='.length)) : null;
+    if (ageArg && !(Number.isInteger(proofHours) && proofHours > 0)) throw new Error('--age-proof=<positive integer hours>');
+    if (!ageArg) await db.InventoryReservation.update({ expires_at: new Date(Date.now() - 1000) }, { where: { order_id: orderId } });
     // Relative to the DB clock; Sequelize would otherwise overwrite updated_at.
-    await db.sequelize.query('UPDATE order_payment_confirmations SET updated_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 HOUR) WHERE order_id = ?', { replacements: [orderId] });
+    await db.sequelize.query('UPDATE order_payment_confirmations SET updated_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? HOUR) WHERE order_id = ?', { replacements: [proofHours || 100, orderId] });
     console.info(`E2E expire | order ${orderId} | ${await cancelIfStale(orderId)}`);
   } finally {
     await db.sequelize.close();
