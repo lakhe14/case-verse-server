@@ -4,7 +4,8 @@
  * Inventory reservations.
  *
  *   physical  = product_variants.stock_quantity (changes only on payment
- *               confirmation, committed-order cancellation, or admin edits)
+ *               confirmation, committed-order cancellation, or admin edits
+ *               through setPhysicalStock, which never goes below reserved)
  *   reserved  = SUM(inventory_reservations.quantity) WHERE status = 'active'
  *               AND expires_at > now
  *   available = max(physical - reserved, 0)  -> what customers can buy
@@ -153,6 +154,43 @@ async function releaseForOrder(orderId, transaction) {
   return { hadReservations: rows.length > 0 };
 }
 
+/**
+ * Orders placed before reservations existed were deducted at placement; on
+ * cancellation they are restocked from their items.
+ */
+async function restockLegacyItems(items, transaction) {
+  for (const item of items) {
+    await db.ProductVariant.increment({ stock_quantity: item.quantity }, { where: { id: item.variant_id }, transaction });
+  }
+}
+
+/**
+ * Admin edit of physical stock, the only non-order path that changes it.
+ * Must run inside a STOCK_TX transaction: the variant row is locked first, so
+ * placement (which locks the same row before reserving) and payment
+ * confirmation are serialized with this check-and-write. Physical stock may
+ * never be set below the quantity held by active, unexpired reservations.
+ * Returns { physical, reserved, available } after the write.
+ */
+async function setPhysicalStock(variantId, quantity, transaction) {
+  const variant = await db.ProductVariant.findByPk(variantId, { lock: transaction.LOCK.UPDATE, transaction });
+  if (!variant) throw ApiError.notFound('Variant not found', 'variant_not_found');
+  const reserved = (await reservedByVariant([variant.id], { transaction })).get(variant.id);
+  if (quantity !== variant.stock_quantity) {
+    if (quantity < reserved) {
+      throw new ApiError(
+        409,
+        'Stock cannot be set below the quantity currently reserved for active orders.',
+        'stock_below_reserved',
+        { physical_stock: variant.stock_quantity, reserved_quantity: reserved, minimum_allowed_stock: reserved }
+      );
+    }
+    variant.stock_quantity = quantity;
+    await variant.save({ transaction });
+  }
+  return { physical: variant.stock_quantity, reserved, available: Math.max(variant.stock_quantity - reserved, 0) };
+}
+
 /** Bookkeeping only: marks lapsed holds as expired. Availability already ignores them. */
 async function expireStale({ transaction } = {}) {
   const [count] = await db.InventoryReservation.update(
@@ -180,6 +218,8 @@ module.exports = {
   extendHold,
   commitForOrder,
   releaseForOrder,
+  restockLegacyItems,
+  setPhysicalStock,
   expireStale,
   assertCommitted,
 };

@@ -780,14 +780,7 @@ async function transitionOrderStatus(orderId, { status, note }, staffId, transac
       // restocked exactly once. Legacy orders placed before reservations
       // existed were deducted at placement and are restocked from their items.
       const { hadReservations } = await inventory.releaseForOrder(order.id, t);
-      if (!hadReservations) {
-        for (const item of order.items) {
-          await db.ProductVariant.increment(
-            { stock_quantity: item.quantity },
-            { where: { id: item.variant_id }, transaction: t }
-          );
-        }
-      }
+      if (!hadReservations) await inventory.restockLegacyItems(order.items, t);
     }
 
     order.status = status;

@@ -4,6 +4,7 @@ const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { slugify } = require('../utils/slug');
 const { productInclude, shapeProducts } = require('./catalog.service');
+const inventory = require('./inventory.service');
 
 /* ------------------------------ Categories ------------------------------ */
 
@@ -123,19 +124,22 @@ async function createVariant(productId, payload) {
   });
 }
 
-async function updateVariant(variantId, payload) {
-  const variant = await db.ProductVariant.findByPk(variantId);
-  if (!variant) throw ApiError.notFound('Variant not found', 'variant_not_found');
-  return db.sequelize.transaction(async (t) => {
+async function updateVariant(productId, variantId, payload) {
+  // Stock edits are checked against active reservations, so this runs at the
+  // same isolation as order placement and locks the variant row first.
+  return db.sequelize.transaction(inventory.STOCK_TX, async (t) => {
+    const variant = await db.ProductVariant.findByPk(variantId, { lock: t.LOCK.UPDATE, transaction: t });
+    if (!variant || variant.product_id !== productId) throw ApiError.notFound('Variant not found', 'variant_not_found');
     await variant.update(
       {
         sku: payload.sku ?? variant.sku,
         price: payload.price ?? variant.price,
-        stock_quantity: payload.stock_quantity ?? variant.stock_quantity,
         is_active: payload.is_active ?? variant.is_active,
       },
       { transaction: t }
     );
+    // Physical stock goes only through the inventory service (reserved floor).
+    if (payload.stock_quantity != null) await inventory.setPhysicalStock(variant.id, payload.stock_quantity, t);
     if (payload.attributes) {
       await db.VariantAttributeValue.destroy({ where: { variant_id: variantId }, transaction: t });
       if (payload.attributes.length) {
