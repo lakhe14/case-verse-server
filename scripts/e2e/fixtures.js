@@ -15,7 +15,8 @@ const { assertE2eDatabaseName, assertE2eDirectory } = require('../../config/e2eG
 const { hashPassword } = require('../../services/password.service');
 const { slugify } = require('../../utils/slug');
 const { seedRbac } = require('../seed');
-const { TAG, ACCOUNTS, passwordFor, PRICE, COMPARE_AT_PRICE, CATALOG } = require('./fixtureData');
+const { TAG, ACCOUNTS, passwordFor, PRICE, COMPARE_AT_PRICE, CATALOG, COUPONS, COUPON_DISCOUNT } = require('./fixtureData');
+const CUSTOMER_COUNT = Object.values(ACCOUNTS).filter((a) => a.type === 'customer').length;
 
 const CATEGORY_SLUG = 'iphone-covers';
 const PHONE_MODEL = 'Phone Model';
@@ -194,7 +195,16 @@ function isClean(result) {
   return result.e2e_orders === 0 && result.e2e_payment_confirmations === 0 && result.e2e_guest_orders === 0
     && result.e2e_idempotency_rows === 0 && result.idempotency_rows_in_e2e_db === 0 && result.reservations_in_e2e_db === 0
     && result.other_orders_in_e2e_db === 0 && result.proof_files === 0 && result.stock_mismatches === 0
-    && result.fixture_cart_items === 0 && result.fixture_customers_active === 2 && result.fixture_staff_active === 2;
+    && result.fixture_cart_items === 0 && result.fixture_customers_active === CUSTOMER_COUNT && result.fixture_staff_active === 2;
+}
+
+async function seedCoupons() {
+  for (const coupon of COUPONS) {
+    const values = { ...coupon, discount_type: 'fixed', discount_value: COUPON_DISCOUNT, min_order_amount: 0, starts_at: null, ends_at: null, is_active: true };
+    const [row] = await db.Coupon.findOrCreate({ where: { code: coupon.code }, defaults: values });
+    await row.update(values);
+  }
+  return COUPONS.length;
 }
 
 async function seedAll() {
@@ -202,7 +212,8 @@ async function seedAll() {
   await seedRbac();
   const accounts = await seedAccounts();
   const catalog = await seedCatalog();
-  return { databaseName, accounts, catalog };
+  const coupons = await seedCoupons();
+  return { databaseName, accounts, catalog, coupons };
 }
 
 module.exports = { skuFor, fixtureStock, buildOrderScope, assertConnectedToE2e, seedAll, cleanup, verify, isClean, sweepProofFiles };

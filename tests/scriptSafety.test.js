@@ -41,3 +41,17 @@ describe('errorHandler foreign-key fallback', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/order_items|ibfk|FOREIGN|DELETE|product_variants/);
   });
 });
+
+describe('errorHandler lock-conflict translation', () => {
+  it.each(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT'])('turns %s into a safe, retryable 409', (dbCode) => {
+    const err = Object.assign(new Error('Deadlock found when trying to get lock; try restarting transaction'), {
+      name: 'SequelizeDatabaseError',
+      parent: { code: dbCode, sql: 'SELECT `id` FROM `coupons` WHERE `code` = \'X\' FOR UPDATE' },
+    });
+    const res = { statusCode: 0, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    errorHandler(err, { requestId: 'req-2', originalUrl: '/api/orders' }, res, () => {});
+    expect(res.statusCode).toBe(409);
+    expect(res.body.error).toEqual({ message: 'Another update was in progress. Please try again.', code: 'retry_conflict', request_id: 'req-2' });
+    expect(JSON.stringify(res.body)).not.toMatch(/Deadlock|lock|SELECT|coupons/);
+  });
+});

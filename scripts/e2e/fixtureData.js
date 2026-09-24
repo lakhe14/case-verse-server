@@ -32,6 +32,31 @@ const ACCOUNTS = {
     defaultPassword: 'e2e-only-customer-b-pass',
     address: { label: 'E2E fixture', recipient_name: 'E2E Customer B', phone: '9800000002', line1: 'E2E fixture street 2', city: 'Lalitpur', state: 'Bagmati', country: 'Nepal' },
   },
+  // Extra customers for concurrent-checkout tests (several distinct carts).
+  customerC: {
+    type: 'customer',
+    name: 'E2E Customer C',
+    email: `customer-c@${EMAIL_DOMAIN}`,
+    passwordEnv: 'E2E_CUSTOMER_C_PASSWORD',
+    defaultPassword: 'e2e-only-customer-c-pass',
+    address: { label: 'E2E fixture', recipient_name: 'E2E Customer C', phone: '9800000003', line1: 'E2E fixture street 3', city: 'Kathmandu', state: 'Bagmati', country: 'Nepal' },
+  },
+  customerD: {
+    type: 'customer',
+    name: 'E2E Customer D',
+    email: `customer-d@${EMAIL_DOMAIN}`,
+    passwordEnv: 'E2E_CUSTOMER_D_PASSWORD',
+    defaultPassword: 'e2e-only-customer-d-pass',
+    address: { label: 'E2E fixture', recipient_name: 'E2E Customer D', phone: '9800000004', line1: 'E2E fixture street 4', city: 'Kathmandu', state: 'Bagmati', country: 'Nepal' },
+  },
+  customerE: {
+    type: 'customer',
+    name: 'E2E Customer E',
+    email: `customer-e@${EMAIL_DOMAIN}`,
+    passwordEnv: 'E2E_CUSTOMER_E_PASSWORD',
+    defaultPassword: 'e2e-only-customer-e-pass',
+    address: { label: 'E2E fixture', recipient_name: 'E2E Customer E', phone: '9800000005', line1: 'E2E fixture street 5', city: 'Kathmandu', state: 'Bagmati', country: 'Nepal' },
+  },
   staff: {
     type: 'staff',
     name: 'E2E Payment Staff',
@@ -72,4 +97,15 @@ const CATALOG = [
   { name: 'E2E Stock probe', image: 'Glossy_black.png', variants: [['iPhone 15', 6]] },
 ];
 
-module.exports = { TAG, EMAIL_DOMAIN, ACCOUNTS, passwordFor, PRICE, COMPARE_AT_PRICE, CATALOG };
+// Deterministic coupons for usage-limit tests. Their uses are removed with the
+// fixture orders by cleanup, so every run starts with no active uses.
+const COUPONS = [
+  { code: 'E2EONCE', description: 'E2E: one use in total', usage_limit_total: 1, usage_limit_per_user: null },
+  { code: 'E2EUSERONCE', description: 'E2E: one use per customer', usage_limit_total: null, usage_limit_per_user: 1 },
+  { code: 'E2ETHREE', description: 'E2E: three uses in total', usage_limit_total: 3, usage_limit_per_user: null },
+  { code: 'E2EPAIDONCE', description: 'E2E: one use in total (paid cancellation)', usage_limit_total: 1, usage_limit_per_user: null },
+  { code: 'E2EBROWSERONCE', description: 'E2E: one use in total (browser flow)', usage_limit_total: 1, usage_limit_per_user: null },
+];
+const COUPON_DISCOUNT = 50;
+
+module.exports = { TAG, EMAIL_DOMAIN, ACCOUNTS, passwordFor, PRICE, COMPARE_AT_PRICE, CATALOG, COUPONS, COUPON_DISCOUNT };
