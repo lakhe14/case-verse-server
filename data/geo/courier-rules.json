@@ -1,0 +1,7 @@
+{
+  "description": "Courier knowledge that cannot be derived from place names. Each rule maps one official local level to the name of an existing ParcelMoover destination. A rule is used only while a destination with exactly that name is in the live ParcelMoover list; otherwise it is ignored, so a rule can never invent a destination. Owner review: confirm these match how ParcelMoover prices inside-ring-road deliveries.",
+  "municipality_rules": [
+    { "district": "Kathmandu", "municipality": "Kathmandu", "destination_name": "INSIDE VALLEY - KTM" },
+    { "district": "Lalitpur", "municipality": "Lalitpur", "destination_name": "INSIDE VALLEY - KTM" }
+  ]
+}

@@ -86,6 +86,7 @@ Set in `render.yaml` (non-secret, may be changed in the dashboard):
 | `PAYMENT_PROOF_REVIEW_SLA_HOURS` | "Review overdue" display threshold (72); never cancels |
 | `PARCELMOOVER_BASE_URL` | ParcelMoover API base URL |
 | `PARCELMOOVER_DEFAULT_WEIGHT_KG` | parcel weight used for quotes |
+| `GEOCODER_BASE_URL` | reverse geocoder for checkout "Use my location" (public OSM Nominatim; LocationIQ or self-hosted Nominatim by changing it) |
 
 Entered in the dashboard (`sync: false`, secrets or per-environment):
 
@@ -98,6 +99,8 @@ Entered in the dashboard (`sync: false`, secrets or per-environment):
 | `JWT_REFRESH_SECRET` | yes | yes | random, at least 32 characters, different |
 | `GUEST_REPLAY_SECRET` | yes | yes | random, at least 32 characters, different from both JWT secrets |
 | `PARCELMOOVER_API_KEY` | yes | yes | ParcelMoover key (server only) |
+| `GEOCODER_CONTACT` | yes | no | support URL or email sent in the geocoder User-Agent (Nominatim usage policy) |
+| `GEOCODER_API_KEY` | optional | no | only for a keyed provider such as LocationIQ (server only) |
 
 The cron job must use the same database, secrets and origin as the web
 service. Generate each secret separately, e.g.

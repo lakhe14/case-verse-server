@@ -44,6 +44,8 @@ services:
         value: https://portal.parcelmoover.com/api/v1
       - key: PARCELMOOVER_DEFAULT_WEIGHT_KG
         value: "0.5"
+      - key: GEOCODER_BASE_URL
+        value: https://nominatim.openstreetmap.org
       # Secrets and environment-specific values: entered in the dashboard.
       - key: CLIENT_ORIGIN
         sync: false
@@ -58,6 +60,9 @@ services:
       - key: GUEST_REPLAY_SECRET
         sync: false
       - key: PARCELMOOVER_API_KEY
+        sync: false
+      # Contact for the geocoder's usage policy (support URL or email).
+      - key: GEOCODER_CONTACT
         sync: false
 
   # Cancels unpaid orders whose stock hold has lapsed. Overlapping runs are

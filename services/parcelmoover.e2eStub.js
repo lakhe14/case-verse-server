@@ -8,8 +8,11 @@
  */
 
 const DESTINATIONS = [
-  { destinationId: 'e2e-kathmandu', destinationName: 'E2E Kathmandu', zone: 'Inside valley', valley: 'inside', baseCharge: 100 },
-  { destinationId: 'e2e-pokhara', destinationName: 'E2E Pokhara', zone: 'Outside valley', valley: 'outside', baseCharge: 150 },
+  // Names follow the provider's "LOCALITY - DISTRICT" format so the locality
+  // search and suggestions run against realistic data; ids stay E2E-only.
+  { destinationId: 'e2e-kathmandu', destinationName: 'INSIDE VALLEY - KTM', zone: 'inside_valley', valley: 'inside', baseCharge: 100 },
+  { destinationId: 'e2e-pokhara', destinationName: 'POKHARA - KASKI', zone: 'major_cities', valley: 'outside', baseCharge: 150 },
+  { destinationId: 'e2e-khadichaur', destinationName: 'KHADICHAUR - SINDHUPALCHOK', zone: 'urban_areas', valley: 'outside', baseCharge: 160 },
 ];
 
 function configuration() {

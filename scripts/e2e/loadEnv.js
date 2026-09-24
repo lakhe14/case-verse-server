@@ -52,6 +52,8 @@ function loadE2eEnv({ mutation = false } = {}) {
   setDefault('UPLOAD_DIR', path.join(E2E_TMP_ROOT, 'e2e-uploads'));
   setDefault('PRIVATE_UPLOAD_DIR', path.join(E2E_TMP_ROOT, 'e2e-payment-proofs'));
   setDefault('PARCELMOOVER_MODE', process.env.E2E_PARCELMOOVER_LIVE === 'true' ? 'live' : 'e2e-stub');
+  // Never call the public geocoder from automated runs.
+  setDefault('GEOCODER_MODE', 'e2e-stub');
   setDefault('E2E_RUN_ID', newRunId());
   // Per-run secrets: an E2E token can never verify against the dev API.
   setDefault('JWT_ACCESS_SECRET', crypto.randomBytes(32).toString('hex'));

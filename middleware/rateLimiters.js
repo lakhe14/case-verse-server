@@ -26,5 +26,10 @@ module.exports = {
   // and must allow many guests behind one shared mobile IP.
   guestLookup: limit({ max: 300 }),
   shippingDestinations: limit({ windowMs: 5 * 60 * 1000, max: 120 }),
+  // One tap per lookup; the upstream geocoder allows about 1 request/second overall.
+  geoReverse: limit({ max: 20 }),
+  // Debounced search-as-you-type against the offline index.
+  // Generous: many shoppers can share one mobile (CGNAT) IP.
+  localitySearch: limit({ windowMs: 5 * 60 * 1000, max: 600 }),
   staffPaymentActions: limit({ max: 60 }),
 };

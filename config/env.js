@@ -119,6 +119,19 @@ const env = {
   // isolated E2E environment; every other environment calls the real provider.
   parcelmooverStub: isE2e && process.env.PARCELMOOVER_MODE === 'e2e-stub',
 
+  // Reverse geocoding for "Use my location" (services/geo/reverseGeocode.service.js).
+  // Any Nominatim-compatible API: the public OSM instance by default, or
+  // LocationIQ / a self-hosted Nominatim by changing the base URL (and key).
+  geocoder: {
+    baseUrl: process.env.GEOCODER_BASE_URL || 'https://nominatim.openstreetmap.org',
+    apiKey: process.env.GEOCODER_API_KEY || null,
+    // Contact details sent in the User-Agent, as the Nominatim usage policy asks.
+    contact: process.env.GEOCODER_CONTACT || null,
+    referer: process.env.GEOCODER_REFERER || (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',')[0].trim(),
+    // Test-only canned responses; honoured solely in the isolated E2E environment.
+    stub: isE2e && process.env.GEOCODER_MODE === 'e2e-stub',
+  },
+
   loyalty: {
     earnRate: parseFloat(process.env.LOYALTY_EARN_RATE || '0.02'),
     pointValue: parseFloat(process.env.LOYALTY_POINT_VALUE || '1'),

@@ -1,0 +1,8 @@
+{
+  "description": "Well-known localities that OpenStreetMap records only as a street, landmark or campsite rather than as a place node. The build script (scripts/geo/buildLocalityIndex.js) resolves each entry to the named OSM feature below, takes that feature's position, and assigns municipality and district from the OSM boundaries exactly like any other place. Nothing here names a district, municipality or courier destination by hand. Add an entry only when a customer-familiar place name is missing from the generated index.",
+  "localities": [
+    { "name": "Hadigaun", "osm": "way/169994053", "osm_name": "Hadigaun Marg" },
+    { "name": "Basantapur", "osm": "relation/3498817", "osm_name": "Basantapur Dabali" },
+    { "name": "Sukute", "osm": "node/3231427930", "osm_name": "Sukute Beach" }
+  ]
+}
