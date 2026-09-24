@@ -19,6 +19,12 @@ function errorHandler(err, req, res, next) {
     code = 'conflict';
     message = 'A record with those values already exists';
     details = err.errors?.map((e) => ({ path: e.path, message: e.message }));
+  } else if (err && err.name === 'SequelizeForeignKeyConstraintError') {
+    // Services pre-check references and return specific codes; this is the
+    // fallback for a race. Never echo the constraint, table or SQL.
+    status = 409;
+    code = 'conflict';
+    message = 'This record is referenced by other records and cannot be changed this way.';
   } else if (err && err.name === 'SequelizeValidationError') {
     status = 422;
     code = 'validation_failed';

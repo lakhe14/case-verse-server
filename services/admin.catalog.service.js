@@ -83,10 +83,41 @@ async function updateProduct(productId, payload) {
   return loadProduct(product.id);
 }
 
+/*
+ * Order lines and stock holds keep a hard reference to their variant, so a
+ * variant (or a product owning one) with order history is never deleted:
+ * staff deactivate it instead. The pre-check gives the business error; the
+ * FK translation covers an order placed between the check and the delete.
+ */
+const IN_USE = {
+  product: ['This product cannot be deleted because it is referenced by existing orders. Deactivate it instead.', 'product_in_use'],
+  variant: ['This variant cannot be deleted because it is referenced by existing orders. Deactivate it instead.', 'variant_in_use'],
+};
+
+async function hasOrderHistory(variantIds) {
+  if (!variantIds.length) return false;
+  const where = { variant_id: { [db.Sequelize.Op.in]: variantIds } };
+  const [items, holds] = await Promise.all([
+    db.OrderItem.count({ where }),
+    db.InventoryReservation.count({ where }),
+  ]);
+  return items + holds > 0;
+}
+
+async function destroyUnlessInUse(instance, kind) {
+  try {
+    await instance.destroy();
+  } catch (error) {
+    if (error.name === 'SequelizeForeignKeyConstraintError') throw ApiError.conflict(...IN_USE[kind]);
+    throw error;
+  }
+}
+
 async function deleteProduct(productId) {
-  const product = await db.Product.findByPk(productId);
+  const product = await db.Product.findByPk(productId, { include: [{ model: db.ProductVariant, as: 'variants', attributes: ['id'] }] });
   if (!product) throw ApiError.notFound('Product not found', 'product_not_found');
-  await product.destroy(); // cascades to variants/images via FK
+  if (await hasOrderHistory(product.variants.map((v) => v.id))) throw ApiError.conflict(...IN_USE.product);
+  await destroyUnlessInUse(product, 'product'); // cascades to variants/images via FK
 }
 
 /* ------------------------------- Variants ------------------------------- */
@@ -157,10 +188,11 @@ async function updateVariant(productId, variantId, payload) {
   });
 }
 
-async function deleteVariant(variantId) {
+async function deleteVariant(productId, variantId) {
   const variant = await db.ProductVariant.findByPk(variantId);
-  if (!variant) throw ApiError.notFound('Variant not found', 'variant_not_found');
-  await variant.destroy();
+  if (!variant || variant.product_id !== productId) throw ApiError.notFound('Variant not found', 'variant_not_found');
+  if (await hasOrderHistory([variant.id])) throw ApiError.conflict(...IN_USE.variant);
+  await destroyUnlessInUse(variant, 'variant');
 }
 
 /* -------------------------------- Images -------------------------------- */

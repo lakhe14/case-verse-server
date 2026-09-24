@@ -38,7 +38,7 @@ exports.updateVariant = asyncHandler(async (req, res) => {
 });
 
 exports.deleteVariant = asyncHandler(async (req, res) => {
-  await svc.deleteVariant(req.params.variantId);
+  await svc.deleteVariant(req.params.id, req.params.variantId);
   res.status(204).end();
 });
 
