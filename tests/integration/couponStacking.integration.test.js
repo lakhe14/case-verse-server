@@ -67,11 +67,20 @@ describe('coupon_allowed', () => {
   });
 
   it('three and four covers keep coupons blocked while any pair is priced', async () => {
-    for (const quantity of [3, 4]) {
-      const checkout = await cartWith([{ sku: SKU.pinkBow12, quantity }]);
-      const res = await preview(checkout);
-      expect(res.body.data.coupon_allowed).toBe(!campaignActive);
-      expect(res.body.data.bundle_pairs).toBe(campaignActive ? Math.floor(quantity / 2) : 0);
+    // Enough stock of its own, whatever other suites hold on shared variants.
+    const v = await variant(SKU.pinkBow17);
+    const original = v.stock_quantity;
+    await v.update({ stock_quantity: original + 10 });
+    try {
+      for (const quantity of [3, 4]) {
+        const checkout = await cartWith([{ sku: SKU.pinkBow17, quantity }]);
+        const res = await preview(checkout);
+        expect(res.body.data.coupon_allowed).toBe(!campaignActive);
+        expect(res.body.data.bundle_pairs).toBe(campaignActive ? Math.floor(quantity / 2) : 0);
+      }
+    } finally {
+      await clearCart(await login(KIND));
+      await db.ProductVariant.update({ stock_quantity: original }, { where: { id: v.id } });
     }
   });
 });
