@@ -19,7 +19,9 @@ describe('client-safe error responses', () => {
     expect(res.json).toHaveBeenCalledWith({
       error: { message: 'Something went wrong', code: 'internal_error', request_id: 'request-test-id' },
     });
-    expect(log.mock.calls[0][0].url).toBe('/api/guest-checkout/orders/<redacted>');
+    const record = JSON.parse(log.mock.calls[0][0]);
+    expect(record.path).toBe('/api/guest-checkout/orders/<redacted>');
+    expect(log.mock.calls[0][0]).not.toMatch(/secret|root|opaque-token|mysql:\/\//);
     log.mockRestore();
   });
 });
