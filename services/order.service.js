@@ -13,7 +13,7 @@ const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
 const idempotency = require('./guestIdempotency');
 const inventory = require('./inventory.service');
 
-const { ORDER_STATUSES } = require('../models/order.model');
+const { ORDER_STATUSES, CANCELLATION_REASONS } = require('../models/order.model');
 
 // Allowed forward transitions. 'cancelled' reachable from any non-terminal state.
 const STATUS_FLOW = {
@@ -502,7 +502,7 @@ async function cancelUserOrder(userId, orderId) {
     });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
     await assertSelfCancellable(order, transaction);
-    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation' }, null, transaction);
+    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation', cancellationReason: 'customer' }, null, transaction);
   });
 }
 
@@ -696,7 +696,7 @@ async function cancelGuestOrder(token) {
     });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
     await assertSelfCancellable(order, transaction);
-    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by guest before payment confirmation' }, null, transaction);
+    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by guest before payment confirmation', cancellationReason: 'guest' }, null, transaction);
   });
 }
 
@@ -729,10 +729,17 @@ async function adminGetOrder(orderId, transaction) {
   return shapeOrder(order);
 }
 
-async function transitionOrderStatus(orderId, { status, note }, staffId, transaction) {
+/**
+ * The one place order status changes. cancellationReason (see
+ * CANCELLATION_REASONS) records who or what cancelled; staff changes default to
+ * 'staff'.
+ */
+async function transitionOrderStatus(orderId, { status, note, cancellationReason }, staffId, transaction) {
   if (!ORDER_STATUSES.includes(status)) {
     throw ApiError.badRequest('Unknown status', 'bad_status');
   }
+  const reason = status === 'cancelled' ? cancellationReason || (staffId ? 'staff' : null) : null;
+  if (reason && !CANCELLATION_REASONS.includes(reason)) throw new Error(`Unknown cancellation reason: ${reason}`);
   const transition = async (t) => {
     const order = await db.Order.findByPk(orderId, {
       include: [{ model: db.OrderItem, as: 'items' }],
@@ -784,6 +791,7 @@ async function transitionOrderStatus(orderId, { status, note }, staffId, transac
     }
 
     order.status = status;
+    if (reason) order.cancellation_reason = reason;
     await order.save({ transaction: t });
     await db.OrderStatusHistory.create(
       { order_id: order.id, status, changed_by_staff_id: staffId || null, note: note || null },

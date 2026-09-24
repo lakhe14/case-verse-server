@@ -20,6 +20,7 @@ const MIGRATIONS = [
   'migrateParcelMooverCourier.js',
   'migrateGuestOrderIdempotency.js',
   'migrateInventoryReservations.js',
+  'migrateOrderCancellationReason.js',
 ];
 
 function connectionOptions(url, withDatabase) {

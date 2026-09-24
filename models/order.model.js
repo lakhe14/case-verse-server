@@ -3,6 +3,8 @@
 const { DataTypes, Model } = require('sequelize');
 
 const ORDER_STATUSES = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+// payment_timeout = cancelled by the system after the unpaid order's stock hold expired.
+const CANCELLATION_REASONS = ['customer', 'guest', 'staff', 'payment_timeout'];
 
 module.exports = (sequelize) => {
   class Order extends Model {}
@@ -47,6 +49,8 @@ module.exports = (sequelize) => {
       coupon_id: { type: DataTypes.INTEGER, allowNull: true },
       shipping_address_id: { type: DataTypes.INTEGER, allowNull: true },
       billing_address_id: { type: DataTypes.INTEGER, allowNull: true },
+      // Who or what cancelled the order (CANCELLATION_REASONS); NULL otherwise.
+      cancellation_reason: { type: DataTypes.STRING(40), allowNull: true },
       placed_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },
     {
@@ -190,3 +194,4 @@ module.exports = (sequelize) => {
 };
 
 module.exports.ORDER_STATUSES = ORDER_STATUSES;
+module.exports.CANCELLATION_REASONS = CANCELLATION_REASONS;

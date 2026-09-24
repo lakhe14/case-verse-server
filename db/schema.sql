@@ -251,6 +251,7 @@ CREATE TABLE orders (
     coupon_id           INT NULL,
     shipping_address_id INT NULL,                -- NULL for a guest order (guest_* columns carry delivery info)
     billing_address_id  INT NULL,
+    cancellation_reason VARCHAR(40) NULL,        -- customer | guest | staff | payment_timeout; NULL unless cancelled (or cancelled before this column)
     placed_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (coupon_id) REFERENCES coupons(id),
