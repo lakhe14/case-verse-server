@@ -158,6 +158,9 @@ async function seedSettingsAndCoupons() {
 }
 
 async function main() {
+  // Demo catalog, coupon and placeholder settings are development data only;
+  // production uses npm run db:seed-rbac.
+  if (process.env.NODE_ENV === 'production') throw new Error('db:seed is development-only. Use npm run db:seed-rbac in production.');
   await db.sequelize.authenticate();
   console.info('Seeding...');
   await seedRbac();

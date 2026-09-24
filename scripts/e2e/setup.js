@@ -12,19 +12,8 @@
 
 const { loadE2eEnv, SERVER_ROOT } = require('./loadEnv');
 
-const MIGRATIONS = [
-  'migratePaymentConfirmations.js',
-  'migrateSalePricing.js',
-  'migrateGuestCheckout.js',
-  'migrateDashainCampaign.js',
-  'migrateParcelMooverCourier.js',
-  'migrateGuestOrderIdempotency.js',
-  'migrateInventoryReservations.js',
-  'migrateOrderCancellationReason.js',
-  'migrateReviewHolds.js',
-  'migrateCouponUsageRelease.js',
-  'migrateCouponUsageIndexes.js',
-];
+// Same ordered, idempotent list as `npm run db:migrate`.
+const { MIGRATIONS, runMigrations: runAllMigrations } = require('../migrations');
 
 function connectionOptions(url, withDatabase) {
   const u = new URL(url);
@@ -73,13 +62,8 @@ async function ensureDatabase(databaseName) {
 }
 
 function runMigrations() {
-  const { spawnSync } = require('child_process');
-  const path = require('path');
-  for (const script of MIGRATIONS) {
-    // Children inherit the verified E2E environment and re-run the guard in config/env.js.
-    const result = spawnSync(process.execPath, [path.join(SERVER_ROOT, 'scripts', script)], { env: process.env, stdio: ['ignore', 'ignore', 'inherit'] });
-    if (result.status !== 0) throw new Error(`Migration ${script} failed`);
-  }
+  // Children inherit the verified E2E environment and re-run the guard in config/env.js.
+  runAllMigrations({ quiet: true });
 }
 
 async function main() {

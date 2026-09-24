@@ -37,6 +37,7 @@ function connectOptions(withDatabase) {
 }
 
 async function main() {
+  if (DROP && env.isProd) throw new Error('initDb --drop is disabled in production.');
   const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
   const name = env.db.name;
 

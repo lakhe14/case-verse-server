@@ -108,9 +108,11 @@ const env = {
     maxMb: parseInt(process.env.MAX_UPLOAD_MB || '5', 10),
     // Private payment proofs. E2E runs are confined to server/.tmp so they can
     // never read, write or delete files in the real private-uploads tree.
+    // Outside E2E, PRIVATE_UPLOAD_DIR points at persistent storage (a mounted
+    // disk in production); proofs are never served statically.
     proofDir: isE2e
       ? assertE2eDirectory(path.resolve(__dirname, '..', process.env.PRIVATE_UPLOAD_DIR || path.join(E2E_TMP_ROOT, 'e2e-payment-proofs')), 'PRIVATE_UPLOAD_DIR')
-      : path.resolve(__dirname, '..', 'private-uploads', 'payment-proofs'),
+      : path.resolve(process.env.PRIVATE_UPLOAD_DIR || path.join(__dirname, '..', 'private-uploads', 'payment-proofs')),
   },
 
   // Deterministic, test-only ParcelMoover responses. Only honoured in the
@@ -131,5 +133,44 @@ const env = {
     provider: process.env.PAYMENT_PROVIDER || 'eSewa',
   },
 };
+
+/**
+ * NODE_ENV=production refuses to start on development defaults or unsafe
+ * settings. Messages name the variable, never its value.
+ */
+function assertProductionConfig(config) {
+  const problems = [];
+  const weakSecret = (value) => !value || value.length < 32 || /replace_with|change_?me|example|secret123|password/i.test(value);
+  if (weakSecret(config.jwt.accessSecret)) problems.push('JWT_ACCESS_SECRET must be a random value of at least 32 characters');
+  if (weakSecret(config.jwt.refreshSecret)) problems.push('JWT_REFRESH_SECRET must be a random value of at least 32 characters');
+  if (config.jwt.accessSecret === config.jwt.refreshSecret) problems.push('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ');
+  const replay = process.env.GUEST_REPLAY_SECRET;
+  if (weakSecret(replay) || replay === config.jwt.accessSecret || replay === config.jwt.refreshSecret) {
+    problems.push('GUEST_REPLAY_SECRET must be its own random value of at least 32 characters');
+  }
+  if (!process.env.CLIENT_ORIGIN) {
+    problems.push('CLIENT_ORIGIN must list the storefront origin(s)');
+  } else {
+    for (const origin of config.clientOrigin.split(',').map((s) => s.trim())) {
+      if (!/^https:\/\/[^/*]+$/.test(origin) || /localhost|127\.0\.0\.1/.test(origin)) problems.push('CLIENT_ORIGIN entries must be https:// origins (no wildcard, path or localhost)');
+    }
+  }
+  if (!process.env.DATABASE_URL && !process.env.DB_NAME) problems.push('DATABASE_URL (or DB_*) must name the production database');
+  if (config.db.user === 'root') problems.push('the production database user must not be root');
+  if (/^caseverse_(db|e2e)$|test/i.test(config.db.name)) problems.push('the production database must not be the development, E2E or test database');
+  if (!process.env.PRIVATE_UPLOAD_DIR || !path.isAbsolute(process.env.PRIVATE_UPLOAD_DIR)) {
+    problems.push('PRIVATE_UPLOAD_DIR must be an absolute path on persistent storage');
+  } else {
+    const publicDir = path.resolve(__dirname, '..', config.uploads.dir);
+    const relative = path.relative(publicDir, config.uploads.proofDir);
+    if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) problems.push('PRIVATE_UPLOAD_DIR must not be inside the public UPLOAD_DIR');
+  }
+  if (!process.env.PARCELMOOVER_API_KEY || !process.env.PARCELMOOVER_BASE_URL) problems.push('PARCELMOOVER_API_KEY and PARCELMOOVER_BASE_URL are required');
+  if (problems.length) {
+    throw new Error(`Refusing to start in production:\n - ${[...new Set(problems)].join('\n - ')}`);
+  }
+}
+
+if (env.isProd) assertProductionConfig(env);
 
 module.exports = env;
