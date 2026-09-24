@@ -423,6 +423,7 @@ CREATE TABLE inventory_reservations (
     expires_at  DATETIME NOT NULL,
     UNIQUE KEY uq_reservation_order_variant (order_id, variant_id),
     INDEX idx_reservation_availability (variant_id, status, expires_at),
+    INDEX idx_reservation_retention (status, updated_at),
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (variant_id) REFERENCES product_variants(id)
 ) ENGINE=InnoDB;

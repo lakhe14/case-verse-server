@@ -13,6 +13,7 @@
     "db:migrate-parcelmoover-courier": "node scripts/migrateParcelMooverCourier.js",
     "db:migrate-guest-order-idempotency": "node scripts/migrateGuestOrderIdempotency.js",
     "db:migrate-inventory-reservations": "node scripts/migrateInventoryReservations.js",
+    "inventory:prune-reservations": "node scripts/pruneInventoryReservations.js",
     "db:reset": "node scripts/initDb.js --drop && node scripts/seed.js",
     "db:remove-legacy-bags": "node scripts/removeLegacyBags.js",
     "dev:reset-accounts": "node scripts/resetDevAccounts.js",

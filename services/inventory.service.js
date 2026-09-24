@@ -191,6 +191,71 @@ async function setPhysicalStock(variantId, quantity, transaction) {
   return { physical: variant.stock_quantity, reserved, available: Math.max(variant.stock_quantity - reserved, 0) };
 }
 
+/* ------------------------------- Retention ------------------------------- */
+
+const days = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+/**
+ * How long terminal rows are kept after their last status change (updated_at).
+ * released/expired never moved physical stock; restocked rows describe a
+ * deduction and its reversal, so they are kept longer. committed rows are the
+ * record of a real deduction and are never pruned automatically.
+ */
+function retentionDays() {
+  const base = days(process.env.INVENTORY_RESERVATION_RETENTION_DAYS, 90);
+  return {
+    released: base,
+    expired: base,
+    restocked: days(process.env.INVENTORY_RESTOCKED_RETENTION_DAYS, 180),
+  };
+}
+
+const PRUNE_BATCH_SIZE = 500;
+
+/**
+ * Only rows of CANCELLED orders are eligible. Order lifecycle code treats an
+ * order with no reservation rows as a legacy order (deducted at placement),
+ * so removing the rows of an order that can still be confirmed or cancelled
+ * would make confirmation skip the deduction and cancellation restock stock
+ * that was never taken. Cancelled is final (no transitions out of it), so its
+ * rows are never read again. An expired hold on a still-pending order is
+ * therefore kept until that order is cancelled.
+ */
+function pruneWhere(now) {
+  const policy = retentionDays();
+  const cutoff = (n) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000);
+  return {
+    [Op.or]: Object.entries(policy).map(([status, n]) => ({ status, updated_at: { [Op.lt]: cutoff(n) } })),
+  };
+}
+
+const cancelledOrder = { model: db.Order, as: 'order', attributes: [], where: { status: 'cancelled' }, required: true };
+
+/**
+ * Deletes old terminal reservation rows in bounded batches (never a
+ * full-table delete). Dry run by default: counts only.
+ * Returns { dry_run, eligible, deleted, batches, retention_days }.
+ */
+async function pruneTerminalReservations({ execute = false, batchSize = PRUNE_BATCH_SIZE, maxBatches = 1000, now = new Date() } = {}) {
+  const size = Math.max(1, Math.min(Number(batchSize) || PRUNE_BATCH_SIZE, 5000));
+  const where = pruneWhere(now);
+  const eligible = await db.InventoryReservation.count({ where, include: [cancelledOrder] });
+  const result = { dry_run: !execute, eligible, deleted: 0, batches: 0, retention_days: retentionDays() };
+  if (!execute) return result;
+  while (result.batches < maxBatches) {
+    const rows = await db.InventoryReservation.findAll({ where, include: [cancelledOrder], attributes: ['id'], order: [['id', 'ASC']], limit: size });
+    if (!rows.length) break;
+    // Re-check status and age at delete time so a row changed since the select is kept.
+    result.deleted += await db.InventoryReservation.destroy({ where: { id: { [Op.in]: rows.map((r) => r.id) }, ...where } });
+    result.batches += 1;
+    if (rows.length < size) break;
+  }
+  return result;
+}
+
 /** Bookkeeping only: marks lapsed holds as expired. Availability already ignores them. */
 async function expireStale({ transaction } = {}) {
   const [count] = await db.InventoryReservation.update(
@@ -220,6 +285,8 @@ module.exports = {
   releaseForOrder,
   restockLegacyItems,
   setPhysicalStock,
+  retentionDays,
+  pruneTerminalReservations,
   expireStale,
   assertCommitted,
 };

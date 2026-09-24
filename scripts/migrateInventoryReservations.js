@@ -2,9 +2,10 @@
 
 /**
  * Adds inventory_reservations (reserve on order, deduct on payment confirmation).
- * Additive and idempotent. Does NOT create reservations for existing orders:
- * orders placed before this change were already deducted at placement and keep
- * that legacy behaviour (see services/inventory.service.js).
+ * Additive and idempotent; also adds the retention index to a table created
+ * before it existed. Does NOT create reservations for existing orders: orders
+ * placed before this change were already deducted at placement and keep that
+ * legacy behaviour (see services/inventory.service.js).
  * Usage: npm run db:migrate-inventory-reservations
  */
 const { sequelize } = require('../config/database');
@@ -23,10 +24,17 @@ async function main() {
       expires_at  DATETIME NOT NULL,
       UNIQUE KEY uq_reservation_order_variant (order_id, variant_id),
       INDEX idx_reservation_availability (variant_id, status, expires_at),
+      INDEX idx_reservation_retention (status, updated_at),
       FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
       FOREIGN KEY (variant_id) REFERENCES product_variants(id)
     ) ENGINE=InnoDB
   `);
+  // Retention index for tables created before it existed (pruneTerminalReservations).
+  const [indexes] = await sequelize.query("SHOW INDEX FROM inventory_reservations WHERE Key_name = 'idx_reservation_retention'");
+  if (!indexes.length) {
+    await sequelize.query('ALTER TABLE inventory_reservations ADD INDEX idx_reservation_retention (status, updated_at)');
+    console.info('Added idx_reservation_retention.');
+  }
   console.info('Inventory reservations migration complete.');
   await sequelize.close();
 }
