@@ -33,11 +33,13 @@ app.use(express.urlencoded({ extended: true }));
 const redactGuestTokenPath = (url = '') => url.replace(/(\/api\/guest-checkout\/orders\/)[^/?]+/g, '$1<redacted>');
 if (!env.isTest) app.use(morgan((tokens, req, res) => [tokens.method(req, res), redactGuestTokenPath(req.originalUrl), tokens.status(req, res), `${tokens['response-time'](req, res)} ms`].join(' ')));
 
-// Broad limiter for the whole API; credential routes add their own tighter one.
+// Broad abuse guard for the whole API; sensitive routes add tighter ones.
+// Generous per IP because many customers can share one public IP (mobile
+// CGNAT) and every storefront page view makes several API calls.
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 1000,
+    max: 3000,
     standardHeaders: true,
     legacyHeaders: false,
   })
