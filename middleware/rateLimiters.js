@@ -22,7 +22,9 @@ module.exports = {
   customerCod: limit({ max: 12 }),
   customerProof: limit({ max: 8 }),
   guestCod: limit({ max: 12 }),
-  guestLookup: limit({ max: 60 }),
+  // Guest tokens are 32 random bytes (not guessable); this only curbs scraping,
+  // and must allow many guests behind one shared mobile IP.
+  guestLookup: limit({ max: 300 }),
   shippingDestinations: limit({ windowMs: 5 * 60 * 1000, max: 120 }),
   staffPaymentActions: limit({ max: 60 }),
 };

@@ -18,8 +18,20 @@ const authLimiter = rateLimit({
   message: { error: { message: 'Too many attempts, try again later', code: 'rate_limited' } },
 });
 
+// Sign-in counts failed attempts only: many customers can share one public IP
+// (mobile CGNAT), and successful sign-ins must never lock them out. Register
+// and password-reset keep counting every request (they send email / create rows).
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { message: 'Too many attempts, try again later', code: 'rate_limited' } },
+});
+
 router.post('/register', authLimiter, validate({ body: v.registerSchema }), ctrl.register);
-router.post('/login', authLimiter, validate({ body: v.loginSchema }), ctrl.login);
+router.post('/login', loginLimiter, validate({ body: v.loginSchema }), ctrl.login);
 router.post('/refresh', validate({ body: v.refreshSchema }), ctrl.refresh);
 router.post('/logout', ctrl.logout);
 router.post(
