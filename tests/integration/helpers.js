@@ -48,6 +48,8 @@ const SKU = {
   bowCherry15: skuFor('Bow cherry iconic', 'iPhone 15'),
   pinkFloral17Pro: skuFor('Pink Floral', 'iPhone 17 Pro'),
   flameSilver: skuFor('Flame silver', 'iPhone 11 Pro'),
+  pinkBow17: skuFor('Pink love bow', 'iPhone 17'),
+  pinkFloral15Pro: skuFor('Pink Floral', 'iPhone 15 Pro'),
   stockProbe: skuFor('E2E Stock probe', 'iPhone 15'),
 };
 
