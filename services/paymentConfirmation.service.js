@@ -44,8 +44,9 @@ async function doUploadProof(order, confirmation, file, transaction) {
     throw ApiError.badRequest('This order is not eligible for a new payment proof.', 'payment_not_eligible');
   }
   const oldFile = confirmation.proof_filename;
-  // The customer has paid the advance: hold the stock through staff review.
-  await inventory.extendHold(order.id, { review: true }, transaction);
+  // The customer may already have paid: from now on the order waits on staff,
+  // so the hold has no deadline until staff approve or reject.
+  await inventory.holdUntilReviewed(order.id, transaction);
   await confirmation.update({ method: 'advance_qr', status: 'proof_uploaded', proof_filename: file.filename, admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
   if (oldFile && oldFile !== file.filename) {
     const oldPath = path.join(proofDir, path.basename(oldFile));
@@ -58,8 +59,9 @@ async function doRequestCod(order, confirmation, transaction) {
   if (order.status !== 'pending' || ['approved', 'cod_confirmed'].includes(confirmation.status)) {
     throw ApiError.badRequest('This order is not eligible for COD confirmation.', 'payment_not_eligible');
   }
-  // A COD request is not a confirmation: stock stays reserved, never deducted.
-  await inventory.extendHold(order.id, { review: true }, transaction);
+  // A COD request is not a confirmation and no advance is paid: stock stays
+  // reserved for the COD window (72 h), never deducted.
+  await inventory.setHoldDeadline(order.id, 'cod', transaction);
   await confirmation.update({ method: 'whatsapp_cod', status: 'cod_pending', admin_note: null, reviewed_by_staff_id: null, reviewed_at: null }, { transaction });
   return confirmation;
 }
@@ -103,7 +105,11 @@ async function requestCodGuest(token) {
 async function listQueue({ status, page = 1, limit = 20 } = {}) {
   const where = status ? { status } : { status: { [Op.in]: ['proof_uploaded', 'cod_pending', 'rejected'] } };
   const { rows, count } = await db.OrderPaymentConfirmation.findAndCountAll({ where, include: includeOrder, order: [['updated_at', 'DESC']], limit, offset: (page - 1) * limit });
-  return { data: rows.map((row) => row.get({ plain: true })), pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } };
+  const now = new Date();
+  return {
+    data: rows.map((row) => ({ ...row.get({ plain: true }), review_overdue: orderService.isReviewOverdue(row, now) })),
+    pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
+  };
 }
 
 async function review(id, action, staffId, note) {
@@ -127,9 +133,9 @@ async function review(id, action, staffId, note) {
       );
     } else {
       if (isCod) throw ApiError.badRequest('COD requests can only be confirmed.', 'invalid_payment_review');
-      // Rejection is retryable (the customer may upload a new proof), so the
-      // hold stays but falls back to the unpaid window.
-      await inventory.extendHold(confirmation.order_id, { review: false }, transaction);
+      // Rejection is retryable: the customer gets a fresh retry window (60 min)
+      // to upload a new proof, which removes the deadline again.
+      await inventory.setHoldDeadline(confirmation.order_id, 'retry', transaction);
       await confirmation.update({ status: 'rejected', reviewed_by_staff_id: staffId, reviewed_at: new Date(), admin_note: note || 'Payment proof could not be verified.' }, { transaction });
     }
     return db.OrderPaymentConfirmation.findByPk(id, { include: includeOrder, transaction });

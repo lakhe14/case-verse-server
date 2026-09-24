@@ -14,6 +14,7 @@
     "db:migrate-guest-order-idempotency": "node scripts/migrateGuestOrderIdempotency.js",
     "db:migrate-inventory-reservations": "node scripts/migrateInventoryReservations.js",
     "db:migrate-order-cancellation-reason": "node scripts/migrateOrderCancellationReason.js",
+    "db:migrate-review-holds": "node scripts/migrateReviewHolds.js",
     "inventory:prune-reservations": "node scripts/pruneInventoryReservations.js",
     "orders:cancel-expired": "node scripts/cancelExpiredOrders.js",
     "db:reset": "node scripts/initDb.js --drop && node scripts/seed.js",

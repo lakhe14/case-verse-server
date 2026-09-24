@@ -7,9 +7,13 @@
  *   npm run orders:cancel-expired -- --execute    cancels the eligible orders
  *   optional: --batch-size=100 (max 500)
  *
- * Eligible: order pending, payment not confirmed (pending, proof_uploaded,
- * rejected, cod_pending), every reservation lapsed, and no payment activity
- * inside its own window. Each order is re-checked under row locks and
+ * Recommended production cadence: every 15 minutes. Overlapping runs are safe:
+ * each order is re-checked and cancelled under row locks exactly once.
+ *
+ * Eligible: order pending and waiting on the customer (payment pending,
+ * rejected or cod_pending), every reservation lapsed, and no payment activity
+ * inside its own window. A proof_uploaded order waits on staff and is never
+ * cancelled for time. Each order is re-checked under row locks and
  * cancelled once with reason payment_timeout; physical stock is not changed.
  * Legacy orders without reservations are never touched. Prints aggregate
  * counts only, never order or customer data.

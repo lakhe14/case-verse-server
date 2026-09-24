@@ -5,9 +5,12 @@
  * "pending" forever. Run explicitly (npm run orders:cancel-expired); there is
  * no scheduler.
  *
- * The reservation's expires_at is the payment window. It already encodes every
- * payment state: 60 min after placement or after a rejected proof (retry
- * window), 72 h after a proof upload or COD request (review window).
+ * Only orders waiting on the CUSTOMER time out. The reservation's expires_at is
+ * that deadline: 60 min after placement or after a rejected proof (retry
+ * window), 72 h after a COD request (no advance paid). An uploaded payment
+ * proof waits on STAFF: the customer may already have paid, so a
+ * proof_uploaded order is never cancelled for time, however long review takes
+ * (its hold has no deadline; see inventory.holdUntilReviewed).
  *
  * Cancellation goes through orderService.transitionOrderStatus, like any other
  * cancellation: the holds are released and physical stock is untouched, since
@@ -20,10 +23,9 @@ const inventory = require('./inventory.service');
 const orderService = require('./order.service');
 
 const TIMEOUT_NOTE = 'Cancelled automatically: payment was not confirmed before the reserved stock expired.';
-// Payment states in which nothing has been confirmed yet.
-const UNPAID_PAYMENT_STATUSES = ['pending', 'proof_uploaded', 'rejected', 'cod_pending'];
-// The customer has acted and staff review is pending.
-const REVIEW_PAYMENT_STATUSES = ['proof_uploaded', 'cod_pending'];
+// Payment states that wait on the customer and may time out. proof_uploaded
+// (waiting on staff), approved and cod_confirmed never do.
+const TIMEOUT_PAYMENT_STATUSES = ['pending', 'rejected', 'cod_pending'];
 const BATCH_SIZE = 100;
 
 /**
@@ -35,16 +37,17 @@ function staleUnpaidDecision({ order, payment, reservations, now = new Date() })
   // Orders from before payment confirmations or reservations keep their legacy workflow.
   if (!payment) return { eligible: false, reason: 'legacy_no_payment_record' };
   if (!reservations.length) return { eligible: false, reason: 'legacy_no_reservations' };
-  if (!UNPAID_PAYMENT_STATUSES.includes(payment.status)) return { eligible: false, reason: 'payment_confirmed' };
+  if (payment.status === 'proof_uploaded') return { eligible: false, reason: 'awaiting_staff_review' };
+  if (!TIMEOUT_PAYMENT_STATUSES.includes(payment.status)) return { eligible: false, reason: 'payment_confirmed' };
   // Any committed/released/restocked row means stock already moved: not a plain unpaid hold.
   if (reservations.some((r) => r.status !== 'active' && r.status !== 'expired')) {
     return { eligible: false, reason: 'reservation_not_open' };
   }
-  if (reservations.some((r) => r.status === 'active' && r.expires_at > now)) return { eligible: false, reason: 'hold_active' };
-  // A proof or COD request made after the hold had already lapsed does not
-  // revive the hold (inventory.extendHold), but it still gets its full review
-  // window before the order is cancelled; a rejection gets its retry window.
-  const window = REVIEW_PAYMENT_STATUSES.includes(payment.status) ? inventory.reviewTtlMs() : inventory.pendingTtlMs();
+  if (reservations.some((r) => inventory.isLive(r, now))) return { eligible: false, reason: 'hold_active' };
+  // A COD request or rejection made after the hold had already lapsed does not
+  // revive the hold (inventory.setHoldDeadline), but it still gets its own
+  // window (72 h COD, 60 min retry) before the order is cancelled.
+  const window = payment.status === 'cod_pending' ? inventory.reviewTtlMs() : inventory.pendingTtlMs();
   if (payment.updated_at && payment.updated_at.getTime() + window > now.getTime()) {
     return { eligible: false, reason: 'recent_payment_activity' };
   }
@@ -61,6 +64,13 @@ async function candidateIds({ afterId, limit, now }) {
       attributes: [],
       required: true,
       where: { status: { [Op.in]: ['active', 'expired'] }, expires_at: { [Op.lte]: now } },
+    }, {
+      // Never select orders waiting on staff review, whatever their age.
+      model: db.OrderPaymentConfirmation,
+      as: 'paymentConfirmation',
+      attributes: [],
+      required: true,
+      where: { status: { [Op.in]: TIMEOUT_PAYMENT_STATUSES } },
     }],
     attributes: ['id'],
     group: ['Order.id'],

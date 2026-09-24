@@ -178,7 +178,8 @@ module.exports = (sequelize) => {
       variant_id: { type: DataTypes.INTEGER, allowNull: false },
       quantity: { type: DataTypes.INTEGER, allowNull: false },
       status: { type: DataTypes.ENUM('active', 'committed', 'released', 'expired', 'restocked'), allowNull: false, defaultValue: 'active' },
-      expires_at: { type: DataTypes.DATE, allowNull: false },
+      // NULL while a payment proof awaits staff review: the hold has no deadline.
+      expires_at: { type: DataTypes.DATE, allowNull: true },
     },
     {
       sequelize,

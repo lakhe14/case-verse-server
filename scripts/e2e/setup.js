@@ -21,6 +21,7 @@ const MIGRATIONS = [
   'migrateGuestOrderIdempotency.js',
   'migrateInventoryReservations.js',
   'migrateOrderCancellationReason.js',
+  'migrateReviewHolds.js',
 ];
 
 function connectionOptions(url, withDatabase) {

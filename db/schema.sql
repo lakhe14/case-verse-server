@@ -412,7 +412,8 @@ CREATE TABLE guest_order_idempotency (
 
 -- Unpaid orders reserve stock; product_variants.stock_quantity (physical) is
 -- deducted only when payment is approved / COD confirmed. Available to sell =
--- stock_quantity - SUM(quantity) of active, unexpired reservations.
+-- stock_quantity - SUM(quantity) of active reservations whose expires_at is
+-- NULL (proof awaiting staff review) or still in the future.
 CREATE TABLE inventory_reservations (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     order_id    INT NOT NULL,
@@ -421,7 +422,7 @@ CREATE TABLE inventory_reservations (
     status      ENUM('active','committed','released','expired','restocked') NOT NULL DEFAULT 'active',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    expires_at  DATETIME NOT NULL,
+    expires_at  DATETIME NULL,               -- NULL = payment proof awaiting staff review: no deadline
     UNIQUE KEY uq_reservation_order_variant (order_id, variant_id),
     INDEX idx_reservation_availability (variant_id, status, expires_at),
     INDEX idx_reservation_retention (status, updated_at),

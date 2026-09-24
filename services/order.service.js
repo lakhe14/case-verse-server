@@ -720,13 +720,31 @@ async function adminListOrders({ page = 1, limit = 20, status, q } = {}) {
   };
 }
 
+/**
+ * Staff review target for an uploaded payment proof. Display only: an overdue
+ * proof keeps its hold and its order; nothing is approved, rejected or
+ * cancelled because of it.
+ */
+function reviewSlaMs() {
+  const hours = Number(process.env.PAYMENT_PROOF_REVIEW_SLA_HOURS);
+  return (Number.isFinite(hours) && hours > 0 ? hours : 72) * 60 * 60 * 1000;
+}
+
+/** proof_uploaded (unchanged since the upload) for longer than the review SLA. */
+function isReviewOverdue(confirmation, now = new Date()) {
+  return Boolean(confirmation && confirmation.status === 'proof_uploaded' && confirmation.updated_at
+    && now.getTime() - new Date(confirmation.updated_at).getTime() > reviewSlaMs());
+}
+
 async function adminGetOrder(orderId, transaction) {
   const order = await db.Order.findByPk(orderId, {
     include: [...orderInclude, { model: db.User, as: 'user', attributes: ['id', 'name', 'email'] }],
     transaction,
   });
   if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-  return shapeOrder(order);
+  const shaped = shapeOrder(order);
+  if (shaped.paymentConfirmation) shaped.paymentConfirmation.review_overdue = isReviewOverdue(shaped.paymentConfirmation);
+  return shaped;
 }
 
 /**
@@ -828,6 +846,8 @@ module.exports = {
   cancelGuestOrder,
   adminListOrders,
   adminGetOrder,
+  reviewSlaMs,
+  isReviewOverdue,
   transitionOrderStatus,
   updateOrderStatus,
 };

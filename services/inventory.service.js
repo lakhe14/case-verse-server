@@ -7,7 +7,7 @@
  *               confirmation, committed-order cancellation, or admin edits
  *               through setPhysicalStock, which never goes below reserved)
  *   reserved  = SUM(inventory_reservations.quantity) WHERE status = 'active'
- *               AND expires_at > now
+ *               AND (expires_at IS NULL OR expires_at > now)
  *   available = max(physical - reserved, 0)  -> what customers can buy
  *
  * Reservation lifecycle (one row per order line):
@@ -15,6 +15,14 @@
  *   active -> released   order cancelled before confirmation: physical unchanged
  *   active -> expired    TTL passed without payment action: physical unchanged
  *   committed -> restocked  confirmed order later cancelled: physical += qty (once)
+ *
+ * expires_at is the hold's deadline while the order waits on the CUSTOMER:
+ *   placed / proof rejected  now + RESERVATION_TTL_MINUTES (60): pay or retry
+ *   COD requested            now + RESERVATION_REVIEW_TTL_HOURS (72): no advance paid
+ * expires_at is NULL while the order waits on STAFF: after a payment proof is
+ * uploaded the customer may already have paid, so the hold never lapses on
+ * its own; it ends only when staff approve (committed) or reject (back to a
+ * 60 min retry deadline) or the order is cancelled (released).
  *
  * Orders placed before reservations existed have no rows: their stock was
  * already deducted at placement, so confirmation deducts nothing and
@@ -38,7 +46,10 @@ const pendingTtlMs = () => minutes(process.env.RESERVATION_TTL_MINUTES, 60) * 60
 // After proof upload / COD request the customer has acted; hold through staff review.
 const reviewTtlMs = () => minutes(process.env.RESERVATION_REVIEW_TTL_HOURS, 72) * 60 * 60 * 1000;
 
-const activeWhere = (now = new Date()) => ({ status: 'active', expires_at: { [Op.gt]: now } });
+const activeWhere = (now = new Date()) => ({ status: 'active', [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: now } }] });
+
+/** True while a row still holds stock (see activeWhere). */
+const isLive = (row, now = new Date()) => row.status === 'active' && (row.expires_at === null || row.expires_at > now);
 
 /**
  * Active reserved quantity per variant. Transactions that decide on stock
@@ -84,13 +95,44 @@ async function lockOrderReservations(orderId, transaction) {
 }
 
 /**
- * Moves still-live holds to a new expiry (proof uploaded, COD requested,
- * proof rejected). A hold that already lapsed is NOT revived: its stock may
- * have been sold since, so approval re-validates it instead (commitForOrder).
+ * Customer-side deadline for still-live holds (review holds included):
+ * 'cod' = COD requested (review TTL, 72 h), 'retry' = proof rejected (60 min
+ * to upload a new one). A hold that already lapsed is NOT revived here: its
+ * stock may have been sold since, so approval re-validates it (commitForOrder).
  */
-async function extendHold(orderId, { review }, transaction) {
-  const expiresAt = new Date(Date.now() + (review ? reviewTtlMs() : pendingTtlMs()));
+async function setHoldDeadline(orderId, window, transaction) {
+  const expiresAt = new Date(Date.now() + (window === 'cod' ? reviewTtlMs() : pendingTtlMs()));
   await db.InventoryReservation.update({ expires_at: expiresAt }, { where: { order_id: orderId, ...activeWhere() }, transaction });
+}
+
+/**
+ * Payment proof uploaded: the order now waits on staff, so its hold loses its
+ * deadline (expires_at NULL) until staff approve or reject. A line whose hold
+ * lapsed before the upload is revived only if its stock is still unsold
+ * (variant locked, other live holds counted); otherwise it stays lapsed and
+ * approval re-validates it. Returns the number of lines left unprotected.
+ */
+async function holdUntilReviewed(orderId, transaction) {
+  const rows = (await lockOrderReservations(orderId, transaction)).filter((r) => r.status === 'active' || r.status === 'expired');
+  if (!rows.length) return 0;
+  const now = new Date();
+  const lapsed = rows.filter((r) => !isLive(r, now));
+  const unavailable = new Set();
+  if (lapsed.length) {
+    const ids = lapsed.map((r) => r.variant_id);
+    const variants = await db.ProductVariant.findAll({ where: { id: { [Op.in]: ids } }, lock: transaction.LOCK.UPDATE, transaction });
+    const byId = new Map(variants.map((v) => [v.id, v]));
+    const others = await reservedByVariant(ids, { transaction, excludeOrderId: orderId });
+    for (const row of lapsed) {
+      const variant = byId.get(row.variant_id);
+      if (!variant || variant.stock_quantity - (others.get(row.variant_id) || 0) < row.quantity) unavailable.add(row.id);
+    }
+  }
+  const protectedIds = rows.filter((r) => !unavailable.has(r.id)).map((r) => r.id);
+  if (protectedIds.length) {
+    await db.InventoryReservation.update({ status: 'active', expires_at: null }, { where: { id: { [Op.in]: protectedIds } }, transaction });
+  }
+  return unavailable.size;
 }
 
 /**
@@ -115,7 +157,7 @@ async function commitForOrder(orderId, transaction) {
   });
   const byId = new Map(variants.map((v) => [v.id, v]));
   const now = new Date();
-  const lapsed = pending.filter((row) => row.status === 'expired' || row.expires_at <= now);
+  const lapsed = pending.filter((row) => !isLive(row, now));
   if (lapsed.length) {
     const others = await reservedByVariant(lapsed.map((row) => row.variant_id), { transaction, excludeOrderId: orderId });
     for (const row of lapsed) {
@@ -299,7 +341,9 @@ module.exports = {
   reservedByVariant,
   availabilityFor,
   reserveForOrder,
-  extendHold,
+  isLive,
+  setHoldDeadline,
+  holdUntilReviewed,
   commitForOrder,
   releaseForOrder,
   restockLegacyItems,
