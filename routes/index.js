@@ -1,10 +1,34 @@
 'use strict';
 
 const express = require('express');
+const db = require('../models');
+const cache = require('../services/cache.service');
 
 const router = express.Router();
 
-router.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+/*
+ * MySQL is required: if it does not answer within 2 s the API is unhealthy
+ * (503). Redis is optional: a missing cache is "disabled", an unreachable one
+ * "degraded" (still 200: every read falls back to MySQL). No URLs or
+ * credentials are reported.
+ */
+router.get('/health', async (req, res) => {
+  let database = 'ok';
+  let timer;
+  try {
+    await Promise.race([
+      db.sequelize.query('SELECT 1'),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 2000); }),
+    ]);
+  } catch {
+    database = 'down';
+  } finally {
+    clearTimeout(timer);
+  }
+  const cacheStatus = await cache.status();
+  const status = database !== 'ok' ? 'unhealthy' : cacheStatus === 'degraded' ? 'degraded' : 'ok';
+  res.status(database === 'ok' ? 200 : 503).json({ status, time: new Date().toISOString(), database, cache: cacheStatus });
+});
 
 router.use('/auth', require('./auth.routes'));
 router.use('/staff', require('./staff.routes'));

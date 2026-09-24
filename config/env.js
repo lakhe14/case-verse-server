@@ -86,6 +86,32 @@ function resolveDbConfig() {
   };
 }
 
+/**
+ * Optional Redis read cache (services/cache.service.js). Off unless a Redis URL
+ * is configured; the app never requires Redis. Unit tests never use one, and
+ * the E2E environment only uses E2E_REDIS_URL (never the dev REDIS_URL) with
+ * its own key prefix, so E2E data can never land in the development cache.
+ */
+function resolveCacheConfig() {
+  const url = isE2e ? process.env.E2E_REDIS_URL : process.env.NODE_ENV === 'test' ? undefined : process.env.REDIS_URL;
+  const flag = String(process.env.CACHE_ENABLED ?? 'true').toLowerCase() !== 'false';
+  const int = (value, fallback, min, max) => {
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
+  };
+  const prefix = String(process.env.CACHE_PREFIX || 'caseverse').replace(/[^A-Za-z0-9_-]/g, '') || 'caseverse';
+  return {
+    enabled: Boolean(url) && flag,
+    url: url || null,
+    prefix: isE2e ? `${prefix}-e2e` : prefix,
+    defaultTtlSeconds: int(process.env.CACHE_DEFAULT_TTL_SECONDS, 300, 5, 3600),
+    negativeTtlSeconds: int(process.env.CACHE_NEGATIVE_TTL_SECONDS, 45, 5, 300),
+    // A dead or slow Redis must never make a page wait: fail fast, use MySQL.
+    connectTimeoutMs: 1000,
+    commandTimeoutMs: 150,
+  };
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProd: (process.env.NODE_ENV || 'development') === 'production',
@@ -95,6 +121,8 @@ const env = {
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
 
   db: resolveDbConfig(),
+
+  cache: resolveCacheConfig(),
 
   jwt: {
     accessSecret: required('JWT_ACCESS_SECRET'),
