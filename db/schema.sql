@@ -216,6 +216,7 @@ CREATE TABLE coupon_usages (
     user_id     INT NOT NULL,
     order_id    INT NOT NULL,
     used_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    released_at DATETIME NULL,              -- order cancelled before payment confirmation: no longer counts
     FOREIGN KEY (coupon_id) REFERENCES coupons(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (order_id) REFERENCES orders(id)

@@ -32,14 +32,14 @@ async function validateCoupon({ code, userId, subtotal }, transaction) {
   }
 
   if (coupon.usage_limit_total != null) {
-    const totalUsed = await db.CouponUsage.count({ where: { coupon_id: coupon.id }, transaction });
+    const totalUsed = await db.CouponUsage.count({ where: { coupon_id: coupon.id, released_at: null }, transaction });
     if (totalUsed >= coupon.usage_limit_total) {
       throw ApiError.badRequest('Coupon usage limit reached', 'coupon_exhausted');
     }
   }
   if (coupon.usage_limit_per_user != null && userId) {
     const userUsed = await db.CouponUsage.count({
-      where: { coupon_id: coupon.id, user_id: userId },
+      where: { coupon_id: coupon.id, user_id: userId, released_at: null },
       transaction,
     });
     if (userUsed >= coupon.usage_limit_per_user) {

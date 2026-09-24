@@ -762,6 +762,18 @@ async function adminGetOrder(orderId, transaction) {
 }
 
 /**
+ * An order cancelled before payment confirmation (still pending) gives back
+ * what checkout took: its coupon use stops counting toward usage limits
+ * (released_at; the row stays for history) and redeemed loyalty points are
+ * restored. Runs once per cancellation, inside it, with the order locked;
+ * both steps are idempotent on their own as well.
+ */
+async function releaseCheckoutBenefits(order, transaction) {
+  await db.CouponUsage.update({ released_at: new Date() }, { where: { order_id: order.id, released_at: null }, transaction });
+  if (order.user_id) await loyalty.restoreRedeemedForOrder(order, transaction);
+}
+
+/**
  * The one place order status changes. cancellationReason (see
  * CANCELLATION_REASONS) records who or what cancelled; staff changes default to
  * 'staff'.
@@ -811,6 +823,8 @@ async function transitionOrderStatus(orderId, { status, note, cancellationReason
       // existed were deducted at placement and are restocked from their items.
       const { hadReservations } = await inventory.releaseForOrder(order.id, t);
       if (!hadReservations) await inventory.restockLegacyItems(order.items, t);
+      // Never paid: give back what checkout took (paid orders keep theirs).
+      if (order.status === 'pending') await releaseCheckoutBenefits(order, t);
     }
 
     order.status = status;

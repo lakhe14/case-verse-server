@@ -12,7 +12,7 @@ async function list({ page = 1, limit = 20 } = {}) {
   const withUsage = await Promise.all(
     rows.map(async (c) => ({
       ...c.get({ plain: true }),
-      times_used: await db.CouponUsage.count({ where: { coupon_id: c.id } }),
+      times_used: await db.CouponUsage.count({ where: { coupon_id: c.id, released_at: null } }),
     }))
   );
   return { data: withUsage, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } };

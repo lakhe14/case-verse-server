@@ -37,6 +37,9 @@ module.exports = (sequelize) => {
       user_id: { type: DataTypes.INTEGER, allowNull: false },
       order_id: { type: DataTypes.INTEGER, allowNull: false },
       used_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      // Set when the order was cancelled before payment confirmation: the use
+      // no longer counts toward usage limits (the row stays for history).
+      released_at: { type: DataTypes.DATE, allowNull: true },
     },
     {
       sequelize,

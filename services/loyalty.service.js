@@ -1,5 +1,6 @@
 'use strict';
 
+const { Op } = require('sequelize');
 const db = require('../models');
 const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
@@ -81,6 +82,26 @@ async function redeemPoints({ userId, points, orderId, note }, transaction) {
   return Number((points * env.loyalty.pointValue).toFixed(2));
 }
 
+/**
+ * Order cancelled before payment confirmation: give back the points redeemed
+ * on it. Computed from the ledger (redeem rows minus restores already made),
+ * so a repeat call restores nothing; one positive 'adjustment' row per restore.
+ */
+async function restoreRedeemedForOrder(order, transaction) {
+  const rows = await db.LoyaltyTransaction.findAll({
+    where: { order_id: order.id, type: { [Op.in]: ['redeem', 'adjustment'] } },
+    transaction,
+  });
+  const outstanding = -rows.reduce((sum, row) => sum + row.points, 0);
+  if (outstanding <= 0) return 0;
+  await db.LoyaltyTransaction.create(
+    { user_id: order.user_id, order_id: order.id, points: outstanding, type: 'adjustment', note: `Restored: order ${order.order_number} cancelled before payment confirmation` },
+    { transaction }
+  );
+  await recalcBalance(order.user_id, transaction);
+  return outstanding;
+}
+
 function pointsToCurrency(points) {
   return Number((points * env.loyalty.pointValue).toFixed(2));
 }
@@ -91,5 +112,6 @@ module.exports = {
   listTransactions,
   awardForDeliveredOrder,
   redeemPoints,
+  restoreRedeemedForOrder,
   pointsToCurrency,
 };
