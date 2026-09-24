@@ -29,7 +29,8 @@ async function approve(orderId) {
 /** Back-dates the order's reservation rows without touching their status. */
 async function age(orderId, days) {
   // Sequelize always manages updated_at itself, so the test sets it directly.
-  await db.sequelize.query('UPDATE inventory_reservations SET updated_at = ? WHERE order_id = ?', { replacements: [daysAgo(days), orderId] });
+  // Relative to the DB clock: raw replacements would format the Date in local time.
+  await db.sequelize.query('UPDATE inventory_reservations SET updated_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY) WHERE order_id = ?', { replacements: [days, orderId] });
   const row = await db.InventoryReservation.findOne({ where: { order_id: orderId } });
   expect(Date.now() - row.updated_at.getTime()).toBeGreaterThan((days - 1) * DAY);
   return row;
