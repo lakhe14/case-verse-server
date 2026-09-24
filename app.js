@@ -45,8 +45,15 @@ app.use(
   })
 );
 
-// Serve uploaded product images.
-app.use('/uploads', express.static(path.resolve(__dirname, env.uploads.dir)));
+// Serve uploaded product images. The storefront runs on another origin, so
+// these public images (only) may be embedded cross-origin; helmet's default
+// same-origin resource policy stays on for everything else. Payment proofs
+// live in PRIVATE_UPLOAD_DIR, outside this directory, and are only readable
+// through the authenticated staff endpoint.
+app.use('/uploads', (req, res, next) => {
+  res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(path.resolve(__dirname, env.uploads.dir), { index: false, dotfiles: 'deny' }));
 
 app.use('/api', apiRouter);
 
