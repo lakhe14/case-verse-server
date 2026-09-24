@@ -1,7 +1,7 @@
 'use strict';
 
 const { getCampaign, isActive, DASHAIN_CAMPAIGN } = require('../services/campaign.service');
-const { computeCoverBundle, coversRegularPrice } = require('../services/bundle.service');
+const { computeCoverBundle, coversRegularPrice, couponAllowed } = require('../services/bundle.service');
 
 const inWindow = new Date(DASHAIN_CAMPAIGN.starts_at.getTime() + 1000);
 const beforeWindow = new Date(DASHAIN_CAMPAIGN.starts_at.getTime() - 1000);
@@ -104,5 +104,29 @@ describe('Dashain case bundle — campaign active', () => {
     const result = computeCoverBundle(lines, afterWindow);
     expect(result.campaign_active).toBe(false);
     expect(result.discount).toBe(0);
+  });
+});
+
+describe('coupon stacking with the bundle', () => {
+  const covers = (quantity) => [{ quantity, category_slug: 'iphone-covers' }];
+  const other = (quantity) => [{ quantity, category_slug: 'accessories' }];
+
+  it('allows a coupon on a single cover during the campaign', () => {
+    expect(couponAllowed(computeCoverBundle(covers(1), inWindow))).toBe(true);
+  });
+
+  it('blocks a coupon as soon as any campaign pair is priced (2, 3 and 4 covers)', () => {
+    for (const qty of [2, 3, 4]) expect(couponAllowed(computeCoverBundle(covers(qty), inWindow))).toBe(false);
+  });
+
+  it('does not block two items that are not a qualifying pair', () => {
+    expect(couponAllowed(computeCoverBundle([...covers(1), ...other(1)], inWindow))).toBe(true);
+  });
+
+  it('allows coupons for any quantity outside the campaign window', () => {
+    for (const qty of [1, 2, 4]) {
+      expect(couponAllowed(computeCoverBundle(covers(qty), beforeWindow))).toBe(true);
+      expect(couponAllowed(computeCoverBundle(covers(qty), afterWindow))).toBe(true);
+    }
   });
 });
