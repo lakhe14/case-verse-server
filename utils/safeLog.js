@@ -21,7 +21,7 @@ const redactPath = (url = '') => url
   .replace(/(\/api\/guest-checkout\/orders\/)[^/]+/g, '$1<redacted>')
   .replace(/(\/order\/guest\/)[^/]+/g, '$1<redacted>');
 
-const SAFE_CODE = /^(ER_[A-Z0-9_]+|E[A-Z0-9_]+|CACHE_TIMEOUT)$/;
+const SAFE_CODE = /^(ER_[A-Z0-9_]+|E[A-Z0-9_]+|PROTOCOL_[A-Z_]+)$/;
 
 /** Maps any thrown value to a category and a code that contain no data. */
 function classifyError(error) {
@@ -38,7 +38,7 @@ function classifyError(error) {
 // Credentials and tokens that must not survive even in development output.
 function redactSecrets(text = '') {
   return String(text)
-    .replace(/(mysql|mysqls|postgres|rediss?):\/\/[^\s'"@]*@/gi, '$1://<redacted>@')
+    .replace(/(mysql|mysqls|postgres):\/\/[^\s'"@]*@/gi, '$1://<redacted>@')
     .replace(/Bearer\s+[A-Za-z0-9._-]+/g, 'Bearer <redacted>')
     .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, '<jwt>')
     .replace(/\b[a-f0-9]{40,}\b/gi, '<token>')
