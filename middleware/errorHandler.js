@@ -1,6 +1,7 @@
 'use strict';
 
 const ApiError = require('../utils/ApiError');
+const { logRequestError } = require('../utils/safeLog');
 
 // eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
@@ -53,10 +54,9 @@ function errorHandler(err, req, res, next) {
   }
 
   if (status >= 500) {
-    // Keep diagnostics server-side and avoid serializing an Error object that
-    // may contain driver/upstream details or a guest token in its request URL.
-    const safeUrl = (req.originalUrl || '').replace(/(\/api\/guest-checkout\/orders\/)[^/?]+/g, '$1<redacted>');
-    console.error({ requestId: req.requestId, method: req.method, url: safeUrl, error: err?.name, message: err?.message, stack: err?.stack });
+    // Structured and data-free outside development: category, class and
+    // driver code only; never the message (SQL, values), stack or body.
+    logRequestError(req, status, err);
   }
 
   const payload = { error: { message, code, request_id: req.requestId } };
