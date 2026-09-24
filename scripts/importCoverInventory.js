@@ -31,7 +31,6 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('../models');
-const cache = require('../services/cache.service');
 const { slugify } = require('../utils/slug');
 
 const DATA_PATH = path.resolve(__dirname, '..', '..', 'cover-inventory-import.json');
@@ -182,9 +181,6 @@ async function main() {
   }
   console.info('──────────────────────────────────────────────');
 
-  // Catalog changed: drop the public read cache (no-op when Redis is not configured).
-  await cache.invalidateCatalog();
-  await cache.close();
   await db.sequelize.close();
 }
 

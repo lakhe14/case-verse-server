@@ -2,7 +2,6 @@
 
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
-const cache = require('./cache.service');
 
 /**
  * List every attribute, each with the distinct values already used across all
@@ -89,19 +88,11 @@ async function setCategoryAttributes(categoryId, attributeIds) {
   return listCategoriesWithAttributes().then((all) => all.find((c) => c.id === category.id));
 }
 
-// Attribute names appear in public variant data: renames and deletes
-// invalidate the public catalog cache after they commit.
-const afterWrite = (fn) => async (...args) => {
-  const result = await fn(...args);
-  await cache.invalidateCatalog();
-  return result;
-};
-
 module.exports = {
   listAttributes,
-  createAttribute: afterWrite(createAttribute),
-  renameAttribute: afterWrite(renameAttribute),
-  deleteAttribute: afterWrite(deleteAttribute),
+  createAttribute,
+  renameAttribute,
+  deleteAttribute,
   listCategoriesWithAttributes,
-  setCategoryAttributes: afterWrite(setCategoryAttributes),
+  setCategoryAttributes,
 };

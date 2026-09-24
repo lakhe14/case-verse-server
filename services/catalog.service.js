@@ -1,11 +1,9 @@
 'use strict';
 
-const crypto = require('crypto');
 const { Op } = require('sequelize');
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const inventory = require('./inventory.service');
-const cache = require('./cache.service');
 
 const productInclude = [
   { model: db.Category, as: 'category' },
@@ -87,60 +85,13 @@ async function shapeProducts(products, { publicOnly = true } = {}) {
   return products.map((p) => shapeProduct(p, { publicOnly, availability }));
 }
 
-/* ----------------------------- Public cache ----------------------------- */
-
-/*
- * Public reads cache product METADATA only (names, slugs, prices, images,
- * variant labels, status) through cache.service. Stock is never cached: every
- * response gets live available stock from MySQL (physical minus active holds)
- * merged in, so reservations, releases, expiries, payment commits, restocks
- * and admin stock edits show up immediately without any cache invalidation.
- * Catalog writes invalidate the metadata (see admin.catalog.service).
- */
-
-// Slugs as utils/slug produces them. Anything else still goes to MySQL but
-// never touches the cache, so random or malformed slugs cannot fill Redis.
-const CACHEABLE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const LIST_CACHE_MAX_QUERY = 40;
-const LIST_CACHE_MAX_PAGE = 20;
-const productNotFound = () => ApiError.notFound('Product not found', 'product_not_found');
-
-/** Public DTO with stock fields present but empty (filled by withLiveStock). */
-function publicMetadata(product) {
-  const dto = shapeProduct(product, { publicOnly: true });
-  dto.in_stock = null;
-  for (const variant of dto.variants) {
-    variant.stock_quantity = null;
-    variant.in_stock = null;
-  }
-  return dto;
-}
-
-/** Fills live available stock into public DTOs (two indexed queries per batch). */
-async function withLiveStock(products) {
-  const ids = [...new Set(products.flatMap((p) => p.variants.map((v) => v.id)))];
-  const variants = ids.length ? await db.ProductVariant.findAll({ where: { id: ids }, attributes: ['id', 'stock_quantity'] }) : [];
-  const availability = await inventory.availabilityFor(variants);
-  for (const product of products) {
-    for (const variant of product.variants) {
-      const available = availability.get(variant.id)?.available ?? 0;
-      variant.stock_quantity = available;
-      variant.in_stock = available > 0;
-    }
-    product.in_stock = product.variants.some((v) => v.in_stock);
-  }
-  return products;
-}
-
 async function listCategories() {
-  return cache.readThrough('categories', async () => {
-    const categories = await db.Category.findAll({
-      include: [{ model: db.Product, as: 'products', where: { status: 'active' }, attributes: [], required: true }],
-      order: [['name', 'ASC']],
-      distinct: true,
-    });
-    return categories.map((category) => category.toJSON());
+  const categories = await db.Category.findAll({
+    include: [{ model: db.Product, as: 'products', where: { status: 'active' }, attributes: [], required: true }],
+    order: [['name', 'ASC']],
+    distinct: true,
   });
+  return categories;
 }
 
 async function getCategoryAttributes(categoryId) {
@@ -152,31 +103,6 @@ async function getCategoryAttributes(categoryId) {
 }
 
 async function listProducts({ category, q, page = 1, limit = 20, sort = 'newest', includeInactive = false }) {
-  if (includeInactive) {
-    const { rows, count } = await findProducts({ category, q, page, limit, sort, includeInactive });
-    return {
-      data: await shapeProducts(rows, { publicOnly: false }),
-      pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
-    };
-  }
-  // Canonical, bounded key: only the supported parameters, normalised; long
-  // searches and deep pages skip the cache instead of minting new keys.
-  const search = q ? q.trim().toLowerCase().replace(/\s+/g, ' ') : null;
-  const params = { category: category || null, q: search, page, limit, sort };
-  const cacheable = (!search || search.length <= LIST_CACHE_MAX_QUERY) && page <= LIST_CACHE_MAX_PAGE;
-  const hash = crypto.createHash('sha256').update(JSON.stringify(params)).digest('hex').slice(0, 32);
-  const result = await cache.readThrough(`products:list:${hash}`, async () => {
-    const { rows, count } = await findProducts({ category, q, page, limit, sort });
-    return {
-      data: rows.map(publicMetadata),
-      pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
-    };
-  }, { cacheable });
-  await withLiveStock(result.data);
-  return result;
-}
-
-async function findProducts({ category, q, page, limit, sort, includeInactive = false }) {
   const where = {};
   if (!includeInactive) where.status = 'active';
   if (q) where.name = { [Op.like]: `%${q}%` };
@@ -197,7 +123,7 @@ async function findProducts({ category, q, page, limit, sort, includeInactive = 
     name_desc: [['name', 'DESC']],
   }[sort] || [['created_at', 'DESC']];
 
-  return db.Product.findAndCountAll({
+  const { rows, count } = await db.Product.findAndCountAll({
     where,
     include,
     order,
@@ -205,22 +131,19 @@ async function findProducts({ category, q, page, limit, sort, includeInactive = 
     offset: (page - 1) * limit,
     distinct: true,
   });
+
+  return {
+    data: await shapeProducts(rows, { publicOnly: !includeInactive }),
+    pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
+  };
 }
 
 async function getProductBySlug(slug, { includeInactive = false } = {}) {
-  if (includeInactive) {
-    const product = await db.Product.findOne({ where: { slug }, include: productInclude });
-    if (!product) throw productNotFound();
-    return (await shapeProducts([product], { publicOnly: false }))[0];
+  const product = await db.Product.findOne({ where: { slug }, include: productInclude });
+  if (!product || (!includeInactive && product.status !== 'active')) {
+    throw ApiError.notFound('Product not found', 'product_not_found');
   }
-  // Missing and inactive slugs are cached briefly as "not found" (negative
-  // cache); the catalog write that creates or activates them clears it at once.
-  const dto = await cache.readThrough(`product:slug:${slug}`, async () => {
-    const product = await db.Product.findOne({ where: { slug }, include: productInclude });
-    if (!product || product.status !== 'active') throw productNotFound();
-    return publicMetadata(product);
-  }, { notFound: productNotFound, cacheable: slug.length <= 200 && CACHEABLE_SLUG.test(slug) });
-  return (await withLiveStock([dto]))[0];
+  return (await shapeProducts([product], { publicOnly: !includeInactive }))[0];
 }
 
 /**

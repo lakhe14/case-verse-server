@@ -22,7 +22,6 @@ const path = require('path');
 const { Op } = require('sequelize');
 const db = require('../models');
 const inventory = require('../services/inventory.service');
-const cache = require('../services/cache.service');
 const { slugify } = require('../utils/slug');
 
 const CATEGORY_SLUG = 'iphone-covers';
@@ -232,10 +231,8 @@ async function main() {
     throw new Error(`Post-import verification failed: ${JSON.stringify(checks)}`);
   }
   console.info(JSON.stringify({ backupPath, ...result, ...checks }, null, 2));
-  // Catalog changed: drop the public read cache (no-op when Redis is not configured).
-  await cache.invalidateCatalog();
 }
 
 main()
   .catch((error) => { console.error(error.message); process.exitCode = 1; })
-  .finally(async () => { await cache.close(); await db.sequelize.close(); });
+  .finally(async () => { await db.sequelize.close(); });
