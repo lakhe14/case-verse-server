@@ -1,0 +1,99 @@
+# Render Blueprint for CaseVerse STAGING (API + stale-order cron).
+# Creating these services costs money; nothing here is created automatically.
+# Secrets are never stored in this file: every `sync: false` variable is
+# entered in the Render dashboard when the Blueprint is first applied.
+# See docs/STAGING_DEPLOYMENT.md for each variable and the setup order.
+
+services:
+  - type: web
+    name: caseverse-api-staging
+    runtime: node
+    region: singapore            # closest Render region to Nepal
+    plan: starter                # persistent disks need a paid instance
+    buildCommand: npm ci
+    # Runs on separate compute before each deploy (no disk access, not needed).
+    # Uses the migrator account; the app itself runs with the DML-only account.
+    preDeployCommand: DATABASE_URL="$MIGRATION_DATABASE_URL" npm run db:migrate
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"     # deploy staging deliberately
+    # Payment proofs and admin-uploaded product images. A disk means one
+    # instance only and a short restart gap on each deploy.
+    disk:
+      name: caseverse-staging-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PRIVATE_UPLOAD_DIR
+        value: /var/data/payment-proofs
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: PAYMENT_ADVANCE_AMOUNT
+        value: "100"
+      - key: PAYMENT_PROVIDER
+        value: eSewa
+      - key: RESERVATION_TTL_MINUTES
+        value: "60"
+      - key: RESERVATION_REVIEW_TTL_HOURS
+        value: "72"
+      - key: PAYMENT_PROOF_REVIEW_SLA_HOURS
+        value: "72"
+      - key: PARCELMOOVER_BASE_URL
+        value: https://portal.parcelmoover.com/api/v1
+      - key: PARCELMOOVER_DEFAULT_WEIGHT_KG
+        value: "0.5"
+      # Secrets and environment-specific values: entered in the dashboard.
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: MIGRATION_DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: GUEST_REPLAY_SECRET
+        sync: false
+      - key: PARCELMOOVER_API_KEY
+        sync: false
+
+  # Cancels unpaid orders whose stock hold has lapsed. Overlapping runs are
+  # safe; proof_uploaded orders are never selected. Cron jobs cannot mount a
+  # disk and do not need one; PRIVATE_UPLOAD_DIR only has to satisfy the
+  # production configuration check.
+  - type: cron
+    name: caseverse-cancel-expired-staging
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run orders:cancel-expired -- --execute
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PRIVATE_UPLOAD_DIR
+        value: /var/data/payment-proofs
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: RESERVATION_TTL_MINUTES
+        value: "60"
+      - key: RESERVATION_REVIEW_TTL_HOURS
+        value: "72"
+      - key: PARCELMOOVER_BASE_URL
+        value: https://portal.parcelmoover.com/api/v1
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: GUEST_REPLAY_SECRET
+        sync: false
+      - key: PARCELMOOVER_API_KEY
+        sync: false
