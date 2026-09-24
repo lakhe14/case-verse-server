@@ -6,7 +6,7 @@ const ApiError = require('../utils/ApiError');
 const { generateOrderNumber } = require('../utils/orderNumber');
 const { validateCoupon, lockForRedemption, redeemForOrder } = require('./coupon.service');
 const parcelmoover = require('./parcelmoover.service');
-const { computeCoverBundle } = require('./bundle.service');
+const { computeCoverBundle, couponAllowed } = require('./bundle.service');
 const loyalty = require('./loyalty.service');
 const env = require('../config/env');
 const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
@@ -152,7 +152,7 @@ async function computeTotals({ userId, items, shippingAddress, parcelmooverDesti
   let discount = 0;
   let coupon = null;
   if (couponCode) {
-    if (bundle.pairs > 0) {
+    if (!couponAllowed(bundle)) {
       throw ApiError.badRequest(
         'Coupon codes cannot be combined with the Dashain offer.',
         'coupon_not_combinable_with_campaign'
@@ -205,6 +205,8 @@ async function computeTotals({ userId, items, shippingAddress, parcelmooverDesti
     covers_qty: bundle.covers_qty,
     bundle_discount: bundleDiscount,
     campaign_active: bundle.campaign_active,
+    bundle_pairs: bundle.pairs,
+    coupon_allowed: couponAllowed(bundle),
     campaign_code: bundle.campaign_code,
     campaign_label: bundle.campaign_label,
     free_items: bundle.free_items,

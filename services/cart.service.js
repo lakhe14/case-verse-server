@@ -3,7 +3,7 @@
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const inventory = require('./inventory.service');
-const { computeCoverBundle } = require('./bundle.service');
+const { computeCoverBundle, couponAllowed } = require('./bundle.service');
 
 async function getOrCreateCart(userId, transaction) {
   const [cart] = await db.Cart.findOrCreate({
@@ -80,6 +80,8 @@ async function shapeCart(cart, transaction) {
     covers_qty: bundle.covers_qty,
     bundle_discount: bundle.discount,
     campaign_active: bundle.campaign_active,
+    bundle_pairs: bundle.pairs,
+    coupon_allowed: couponAllowed(bundle),
     campaign_code: bundle.campaign_code,
     campaign_label: bundle.campaign_label,
     free_items: bundle.free_items,

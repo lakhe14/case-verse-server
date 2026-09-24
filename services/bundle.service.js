@@ -93,7 +93,18 @@ function computeCoverBundle(lines, now = new Date()) {
   };
 }
 
+/**
+ * Coupons cannot stack with the Dashain bundle: an order is refused a coupon
+ * exactly when at least one campaign pair is priced into it. A single cover
+ * during the campaign (no pair) may use a coupon. Checkout exposes this as
+ * coupon_allowed so the storefront never re-derives the rule.
+ */
+function couponAllowed(bundle) {
+  return !(bundle.pairs > 0);
+}
+
 module.exports = {
+  couponAllowed,
   COVER_CATEGORY_SLUG,
   COVER_UNIT_PRICE,
   coversRegularPrice,
