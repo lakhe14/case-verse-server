@@ -217,6 +217,8 @@ CREATE TABLE coupon_usages (
     order_id    INT NOT NULL,
     used_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     released_at DATETIME NULL,              -- order cancelled before payment confirmation: no longer counts
+    UNIQUE KEY uq_coupon_usage_order (order_id),                -- one coupon per order
+    INDEX idx_coupon_usage_active (coupon_id, user_id, released_at), -- limit counts under the coupon lock
     FOREIGN KEY (coupon_id) REFERENCES coupons(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (order_id) REFERENCES orders(id)

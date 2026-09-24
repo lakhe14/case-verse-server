@@ -23,6 +23,7 @@ const MIGRATIONS = [
   'migrateOrderCancellationReason.js',
   'migrateReviewHolds.js',
   'migrateCouponUsageRelease.js',
+  'migrateCouponUsageIndexes.js',
 ];
 
 function connectionOptions(url, withDatabase) {
