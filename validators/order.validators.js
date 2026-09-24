@@ -18,8 +18,6 @@ const guestInfoSchema = z.object({
   area: shortText(255),
   landmark: z.string().trim().max(255).optional(),
   notes: z.string().trim().max(500).optional(),
-  latitude: z.coerce.number().min(-90).max(90).optional(),
-  longitude: z.coerce.number().min(-180).max(180).optional(),
   parcelmoover_destination_id: z.string().trim().min(1).max(100),
 });
 

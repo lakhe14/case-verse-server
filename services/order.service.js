@@ -652,8 +652,6 @@ async function createGuestOrder({ items, guest }, { rawKey, keyHash, fingerprint
         guest_area: guest.area,
         guest_landmark: guest.landmark || null,
         guest_delivery_notes: guest.notes || null,
-        guest_latitude: guest.latitude ?? null,
-        guest_longitude: guest.longitude ?? null,
         status: 'pending',
         subtotal_amount: totals.subtotal,
         discount_amount: totals.discount_amount,

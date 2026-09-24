@@ -21,6 +21,8 @@ module.exports = (sequelize) => {
       guest_area: { type: DataTypes.STRING(255), allowNull: true },
       guest_landmark: { type: DataTypes.STRING(255), allowNull: true },
       guest_delivery_notes: { type: DataTypes.STRING(500), allowNull: true },
+      // Historical only: orders placed before September 2026 may carry a pin.
+      // New orders never write a position (checkout sends address fields only).
       guest_latitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
       guest_longitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
       status: {

@@ -17,7 +17,8 @@ const ApiError = require('../utils/ApiError');
 
 const KEY_PATTERN = /^[A-Za-z0-9_-]{36,128}$/;
 const REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
-const FINGERPRINT_VERSION = 'guest-order-v1';
+// v2: positions are no longer part of a guest order.
+const FINGERPRINT_VERSION = 'guest-order-v2';
 const HKDF_INFO = 'caseverse-guest-order-replay-v1';
 
 function parseIdempotencyKey(raw) {
@@ -34,7 +35,6 @@ const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex'
 const hashIdempotencyKey = (key) => sha256(`idempotency:${key}`);
 
 const text = (value) => (value === undefined || value === null ? '' : String(value).trim());
-const coordinate = (value) => (value === undefined || value === null || value === '' ? null : Number(Number(value).toFixed(7)));
 
 /**
  * Canonical, order-determining view of a validated guest request. Items are
@@ -54,7 +54,6 @@ function canonicalGuestRequest({ items, guest }) {
     FINGERPRINT_VERSION,
     lines,
     [text(g.name), text(g.phone), text(g.province), text(g.district), text(g.municipality), text(g.area), text(g.landmark), text(g.notes)],
-    [coordinate(g.latitude), coordinate(g.longitude)],
     text(g.parcelmoover_destination_id),
   ];
 }
