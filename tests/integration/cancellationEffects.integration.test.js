@@ -37,7 +37,9 @@ async function orderWithBenefits() {
   const before = await balance();
   const placed = await placeCustomerOrder('customerA', [{ sku, quantity: 1 }], { extra: { coupon_code: CODE, redeem_points: POINTS } });
   expect(placed.status).toBe(201);
-  expect(placed.body.data.coupon_id).toBe(coupon.id);
+  // Customer responses carry the code, never internal coupon ids.
+  expect(placed.body.data.coupon_code).toBe(CODE);
+  expect((await db.Order.findByPk(placed.body.data.id)).coupon_id).toBe(coupon.id);
   expect(await countedUses()).toBe(1);
   expect(await balance()).toBe(before - POINTS);
   return { id: placed.body.data.id, before };

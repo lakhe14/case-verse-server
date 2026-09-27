@@ -98,6 +98,9 @@ const CATALOG = [
   // Storefront stock wording: one low-stock model and one sold-out model.
   // Tests only read it; nothing places orders against it.
   { name: 'E2E Scarce stock', image: 'Glossy_black.png', variants: [['iPhone 13 mini', 2], ['iPhone 16 Pro', 0]] },
+  // Order-tracking tests place many orders and move some to shipped; own
+  // stock so no other suite runs short.
+  { name: 'E2E Tracking fixture', image: 'Glossy_black.png', variants: [['iPhone 12', 60]] },
 ];
 
 // Deterministic coupons for usage-limit tests. Their uses are removed with the

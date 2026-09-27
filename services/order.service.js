@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { Op } = require('sequelize');
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
@@ -12,6 +13,7 @@ const env = require('../config/env');
 const { generateOpaqueToken, hashOpaqueToken } = require('../utils/tokens');
 const idempotency = require('./guestIdempotency');
 const inventory = require('./inventory.service');
+const { customerOrderView, normalizeNepalPhone, orderPhone, paymentSummary, lineModel } = require('./orderView.service');
 
 const { ORDER_STATUSES, CANCELLATION_REASONS } = require('../models/order.model');
 
@@ -437,7 +439,11 @@ const orderInclude = [
       {
         model: db.ProductVariant,
         as: 'variant',
-        include: [{ model: db.Product, as: 'product', attributes: ['id', 'name', 'slug'] }],
+        include: [
+          { model: db.Product, as: 'product', attributes: ['id', 'name', 'slug'] },
+          // The line's iPhone model; variants with order history are never deleted.
+          { model: db.VariantAttributeValue, as: 'attributeValues', include: [{ model: db.Attribute, as: 'attribute' }] },
+        ],
       },
     ],
   },
@@ -466,11 +472,12 @@ async function listUserOrders(userId, { page = 1, limit = 20, status } = {}) {
     distinct: true,
   });
   return {
-    data: rows.map(shapeOrder),
+    data: rows.map((row) => customerOrderView(row, 'customer')),
     pagination: { page, limit, total: count, pages: Math.ceil(count / limit) },
   };
 }
 
+/** The signed-in customer's own order, customer-safe (see orderView.service). */
 async function getUserOrder(userId, orderId, transaction) {
   const order = await db.Order.findOne({
     where: { id: orderId, user_id: userId },
@@ -478,7 +485,7 @@ async function getUserOrder(userId, orderId, transaction) {
     transaction,
   });
   if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-  return shapeOrder(order);
+  return customerOrderView(order, 'customer');
 }
 
 /**
@@ -524,7 +531,8 @@ async function cancelUserOrder(userId, orderId) {
     const { payment, order } = await lockOrderLifecycle(orderId, transaction, { orderWhere: { user_id: userId } });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
     assertSelfCancellable(order, payment);
-    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation', cancellationReason: 'customer' }, null, transaction);
+    await transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by customer before payment confirmation', cancellationReason: 'customer' }, null, transaction);
+    return getUserOrder(userId, order.id, transaction);
   });
 }
 
@@ -593,7 +601,7 @@ async function replayGuestOrder({ rawKey, keyHash, fingerprint }) {
   if (!order || !token) {
     throw new ApiError(409, 'This order was already placed. Please use the order link you received, or contact support.', 'idempotency_replay_unavailable');
   }
-  return { order: shapeOrder(order), guest_token: token, replayed: true };
+  return { order: customerOrderView(order, 'guest'), guest_token: token, replayed: true };
 }
 
 /**
@@ -688,7 +696,7 @@ async function createGuestOrder({ items, guest }, { rawKey, keyHash, fingerprint
     }, { transaction: t });
 
     const shaped = await db.Order.findOne({ where: { id: order.id }, include: orderInclude, transaction: t });
-    return { order: shapeOrder(shaped), guest_token: raw, replayed: false };
+    return { order: customerOrderView(shaped, 'guest'), guest_token: raw, replayed: false };
   });
 }
 
@@ -702,7 +710,7 @@ async function getGuestOrder(token, transaction) {
     transaction,
   });
   if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
-  return shapeOrder(order);
+  return customerOrderView(order, 'guest');
 }
 
 async function cancelGuestOrder(token) {
@@ -712,8 +720,29 @@ async function cancelGuestOrder(token) {
     const { payment, order } = await lockOrderLifecycle(orderId, transaction, { orderWhere: { user_id: null } });
     if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
     assertSelfCancellable(order, payment);
-    return transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by guest before payment confirmation', cancellationReason: 'guest' }, null, transaction);
+    await transitionOrderStatus(order.id, { status: 'cancelled', note: 'Cancelled by guest before payment confirmation', cancellationReason: 'guest' }, null, transaction);
+    return getGuestOrder(token, transaction);
   });
+}
+
+/* ---------------------------- Public tracking --------------------------- */
+
+const TRACK_NOT_FOUND = "We couldn't find an order with that order ID and phone number. Check both and try again.";
+
+/**
+ * Public order lookup by order number + delivery phone. Order numbers are
+ * random (not sequential) and both must match; any mismatch, unknown number
+ * or order without a phone gives the same 404, so the answer never reveals
+ * whether an order number exists.
+ */
+async function trackOrder({ order_number, phone }) {
+  const wanted = normalizeNepalPhone(phone);
+  const order = await db.Order.findOne({ where: { order_number }, include: orderInclude });
+  const stored = order ? normalizeNepalPhone(orderPhone(order)) : null;
+  // Both normalized numbers are exactly 10 digits, so the compare is length-safe.
+  const matches = Boolean(order && wanted && stored) && crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(wanted));
+  if (!matches) throw ApiError.notFound(TRACK_NOT_FOUND, 'order_lookup_failed');
+  return customerOrderView(order, 'tracking');
 }
 
 /* ------------------------------- Admin ------------------------------- */
@@ -760,6 +789,9 @@ async function adminGetOrder(orderId, transaction) {
   if (!order) throw ApiError.notFound('Order not found', 'order_not_found');
   const shaped = shapeOrder(order);
   if (shaped.paymentConfirmation) shaped.paymentConfirmation.review_overdue = isReviewOverdue(shaped.paymentConfirmation);
+  // Invoice and parcel label read these; money comes from the order's own snapshot columns.
+  shaped.items = (shaped.items || []).map((item) => ({ ...item, model: lineModel(item) }));
+  shaped.payment_summary = paymentSummary(shaped);
   return shaped;
 }
 
@@ -864,6 +896,7 @@ module.exports = {
   previewGuestOrder,
   placeGuestOrder,
   getGuestOrder,
+  trackOrder,
   cancelGuestOrder,
   adminListOrders,
   adminGetOrder,

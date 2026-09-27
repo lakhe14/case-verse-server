@@ -202,7 +202,7 @@ describe('stock and coupon contention', () => {
         const winners = results.filter((r) => r.status === 201);
         expect(winners).toHaveLength(1);
         for (const r of results.filter((x) => x.status !== 201)) expect(['insufficient_stock', 'coupon_exhausted']).toContain(r.body.error.code);
-        const couponWinners = winners.filter((r) => r.body.data.coupon_id).length;
+        const couponWinners = winners.filter((r) => r.body.data.coupon_code).length;
         expect(await activeUses('E2EONCE')).toBe(couponWinners);
         expect((await inventoryOf(lastUnit)).reserved).toBe(reservedBefore + 1);
         while (placed.length) {
@@ -223,7 +223,8 @@ describe('guest checkout', () => {
     const first = await placeGuestOrder([{ sku, quantity: 1 }], { label: 'coupon-guest', key, extra });
     const replay = await placeGuestOrder([{ sku, quantity: 1 }], { label: 'coupon-guest', key, extra });
     expect([first.status, replay.status]).toEqual([201, 200]);
-    expect(first.body.data.coupon_id).toBeNull();
+    expect(first.body.data.coupon_code).toBeNull();
+    expect((await db.Order.findByPk(first.body.data.id)).coupon_id).toBeNull();
     expect(Number(first.body.data.discount_amount)).toBe(0);
     expect(await db.CouponUsage.count({ where: { order_id: first.body.data.id } })).toBe(0);
     expect(await activeUses('E2EONCE')).toBe(0);
