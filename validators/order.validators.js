@@ -30,6 +30,8 @@ const guestPreviewSchema = z.object({
   guest: guestInfoSchema.partial().optional(),
 });
 
+const guestCartSchema = z.object({ items: guestItemsSchema });
+
 const guestPlaceOrderSchema = z.object({
   items: guestItemsSchema,
   guest: guestInfoSchema,
@@ -77,6 +79,7 @@ module.exports = {
   updateStatusSchema,
   validateCouponSchema,
   guestPreviewSchema,
+  guestCartSchema,
   guestPlaceOrderSchema,
   guestTokenParam,
 };

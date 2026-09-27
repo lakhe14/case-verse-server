@@ -102,10 +102,52 @@ async function getCategoryAttributes(categoryId) {
   return category.attributes;
 }
 
+// Words shoppers add that no design name or model contains ("floral case").
+const SEARCH_NOISE = new Set(['a', 'an', 'the', 'for', 'and', 'with', 'case', 'cases', 'cover', 'covers', 'phone']);
+const MAX_SEARCH_TERMS = 6;
+const MODEL_WORDS = new Set(['pro', 'max', 'plus', 'mini']);
+
+/** "iPhone14 Pro  floral" -> ['iphone', '14', 'pro', 'floral'] */
+function searchTerms(q) {
+  const spaced = String(q || '')
+    .toLowerCase()
+    .replace(/([a-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([a-z])/g, '$1 $2');
+  const terms = spaced.split(/[^a-z0-9]+/).filter((t) => t && !SEARCH_NOISE.has(t));
+  return [...new Set(terms)].slice(0, MAX_SEARCH_TERMS);
+}
+
+/**
+ * Storefront search: every term must match either the design (name or
+ * description) or the phone model of one and the same active variant, so
+ * "floral 15 pro" finds Pink Floral because it comes in iPhone 15 Pro, not
+ * because one variant is a 15 and another a Pro. Model terms match whole
+ * words: "14" finds iPhone 14 and iPhone 14 Pro, never iPhone 11.
+ * Terms are [a-z0-9] only (see searchTerms), so they carry no LIKE wildcards.
+ */
+function searchCondition(q) {
+  const terms = searchTerms(q);
+  if (!terms.length) return null;
+  const esc = (value) => db.sequelize.escape(value);
+  // Word-start matching: "flor" finds "Pink Floral". Numbers and model words
+  // must be whole words, so "pro" never matches "probe" and "1" never "13".
+  const pattern = (t) => (/^\d+$/.test(t) || MODEL_WORDS.has(t) ? `% ${t} %` : `% ${t}%`);
+  const words = (column) => `CONCAT(' ', LOWER(REPLACE(REPLACE(COALESCE(${column}, ''), '-', ' '), '_', ' ')), ' ')`;
+  const designMatch = (t) => `(${words('`Product`.`name`')} LIKE ${esc(pattern(t))} OR ${words('`Product`.`description`')} LIKE ${esc(pattern(t))})`;
+  const modelText = words('(SELECT GROUP_CONCAT(vav.value SEPARATOR \' \') FROM variant_attribute_values vav WHERE vav.variant_id = pv.id)');
+  const modelMatch = (t) => `${modelText} LIKE ${esc(pattern(t))}`;
+  const designOnly = terms.map(designMatch).join(' AND ');
+  const perVariant = terms.map((t) => `(${designMatch(t)} OR ${modelMatch(t)})`).join(' AND ');
+  return db.sequelize.literal(
+    `((${designOnly}) OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = \`Product\`.\`id\` AND pv.is_active = 1 AND ${perVariant}))`
+  );
+}
+
 async function listProducts({ category, q, page = 1, limit = 20, sort = 'newest', includeInactive = false }) {
   const where = {};
   if (!includeInactive) where.status = 'active';
-  if (q) where.name = { [Op.like]: `%${q}%` };
+  const search = q ? searchCondition(q) : null;
+  if (search) where[Op.and] = [search];
 
   const include = [...productInclude];
   if (category) {
@@ -184,6 +226,7 @@ async function listBestsellers({ limit = 8 } = {}) {
 }
 
 module.exports = {
+  searchTerms,
   productInclude,
   shapeProduct,
   shapeProducts,

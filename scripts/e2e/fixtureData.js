@@ -95,6 +95,9 @@ const CATALOG = [
   { name: 'Chetah iconic', image: 'Chetah_iconic.png', variants: [['iPhone 14', 10], ['iPhone 15 Pro', 10]] },
   // Dedicated to stock-arithmetic tests (duplicate lines, restock). Stock 6.
   { name: 'E2E Stock probe', image: 'Glossy_black.png', variants: [['iPhone 15', 6]] },
+  // Storefront stock wording: one low-stock model and one sold-out model.
+  // Tests only read it; nothing places orders against it.
+  { name: 'E2E Scarce stock', image: 'Glossy_black.png', variants: [['iPhone 13 mini', 2], ['iPhone 16 Pro', 0]] },
 ];
 
 // Deterministic coupons for usage-limit tests. Their uses are removed with the

@@ -15,6 +15,8 @@ const router = express.Router();
 const guestOrderLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: { message: 'Too many guest checkout attempts. Please try again later.', code: 'rate_limited' } } });
 const guestProofLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { error: { message: 'Too many payment-proof uploads. Please try again later.', code: 'rate_limited' } } });
 
+// Prices and stock-checks the browser-held guest cart; reads only.
+router.post('/cart', validate({ body: v.guestCartSchema }), ctrl.cart);
 router.post('/preview', validate({ body: v.guestPreviewSchema }), ctrl.preview);
 // Idempotency-Key is validated before the body so a malformed key costs nothing.
 const requireIdempotencyKey = (req, _res, next) => {

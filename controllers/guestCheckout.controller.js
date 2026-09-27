@@ -4,9 +4,14 @@ const asyncHandler = require('../utils/asyncHandler');
 const fs = require('fs');
 const orders = require('../services/order.service');
 const payments = require('../services/paymentConfirmation.service');
+const carts = require('../services/cart.service');
 
 exports.preview = asyncHandler(async (req, res) => {
   res.json({ data: await orders.previewGuestOrder(req.body) });
+});
+
+exports.cart = asyncHandler(async (req, res) => {
+  res.json({ data: await carts.getGuestCart(req.body.items) });
 });
 
 exports.place = asyncHandler(async (req, res) => {
