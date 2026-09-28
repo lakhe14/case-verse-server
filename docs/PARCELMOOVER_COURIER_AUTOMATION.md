@@ -60,6 +60,40 @@ format in this repo.
   (`client/src/pages/admin/PrintOrder.jsx`) are CaseVerse's own documents,
   not ParcelMoover documents, and must keep saying so.
 
+## Security & idempotency requirements for future implementation
+
+Whoever implements shipment creation must, regardless of what the provider
+docs turn out to say:
+
+- Never expose `PARCELMOOVER_API_KEY` (or any future ParcelMoover credential)
+  to the client. Server-only, same as today.
+- Never send the payment-proof file/URL, staff notes, or coupon internals to
+  ParcelMoover. Only the fields the provider's documented schema requires.
+- Prevent duplicate shipments on double-click, browser retry, or concurrent
+  staff action: a DB unique constraint plus the existing
+  `guest_order_idempotency` create-then-replay pattern
+  (`order.service.js: replayGuestOrder`/`createGuestOrder`), not a
+  best-effort in-memory check.
+- Take the order lifecycle lock (`order.service.js: lockOrderLifecycle`)
+  before deciding shipment eligibility, so a shipment-create action cannot
+  race a concurrent cancellation/status change on the same order.
+- Never let a courier webhook or sync job silently rewrite financial or
+  inventory state (refund, restock, release reservation) — only the existing
+  order-lifecycle rules in `order.service.js`/`inventory.service.js` may do
+  that.
+- Verify webhook signatures with the provider's documented mechanism before
+  trusting any payload; do not invent a signature scheme if none is
+  documented — use polling/sync instead.
+
+## Warning to future implementers
+
+Do not infer ParcelMoover endpoints from their names, from this document's
+"blocked capabilities" list, or from what a typical courier API "usually"
+looks like. Every field, endpoint, status value, and auth requirement above
+must come from ParcelMoover's own authoritative documentation before it is
+implemented. Guessing produces a real financial action (a courier shipment)
+built on an unverified contract — do not do it.
+
 ## Once documentation is supplied
 
 Re-run the Phase 3 audit against the confirmed capabilities table above, then
