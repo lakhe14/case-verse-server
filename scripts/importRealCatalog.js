@@ -45,7 +45,10 @@ const CATALOG = [
   design('Cast case Black', 'Cat_black.png', [['iPhone 11 Pro Max', 1], ['iPhone 16', 1]]),
   design('Cat Case Sky blue', 'Cat_skyblue.png', [['iPhone 16 Pro Max', 1]]),
   design('Shiny bow iconic', 'Shiny_bow_iconic.png', [['iPhone 11 Pro Max', 1], ['iPhone 12', 3], ['iPhone 12 Pro Max', 2], ['iPhone 13', 3], ['iPhone 13 Pro', 2], ['iPhone 13 Pro Max', 1], ['iPhone 14', 1], ['iPhone 14 Pro', 2], ['iPhone 15 Pro', 1], ['iPhone 16 Pro Max', 1]]),
-  design('Chetah iconic', 'Chetah_iconic.png', [['iPhone 11', 3], ['iPhone 11 Pro Max', 1], ['iPhone 12', 4], ['iPhone 12 Pro Max', 4], ['iPhone 13', 7], ['iPhone 13 Pro', 0], ['iPhone 13 Pro Max', 3], ['iPhone 14', 4], ['iPhone 14 Pro', 2], ['iPhone 15 Pro', 0], ['iPhone 15 Pro Max', 2], ['iPhone 16', 1], ['iPhone 16 Pro', 2], ['iPhone 16 Pro Max', 2]]),
+  // "Chetah" and "Chetah shiny iconic" rows are the same physical design as
+  // "Chetah iconic" (owner-confirmed) and are folded in here, not split out.
+  // Shiny leopard is a different design and keeps its own direct sheet row.
+  design('Chetah iconic', 'Chetah_iconic.png', [['iPhone 11', 3], ['iPhone 11 Pro Max', 3], ['iPhone 12', 4], ['iPhone 12 Pro Max', 4], ['iPhone 13', 7], ['iPhone 13 Pro', 4], ['iPhone 13 Pro Max', 3], ['iPhone 14', 4], ['iPhone 14 Pro', 2], ['iPhone 14 Pro Max', 2], ['iPhone 15', 2], ['iPhone 15 Pro', 2], ['iPhone 15 Pro Max', 3], ['iPhone 16', 1], ['iPhone 16 Pro', 2], ['iPhone 16 Pro Max', 2]]),
   design('Pink love bow', 'Pink_love_bow.png', [['iPhone 12', 5], ['iPhone 12 Pro Max', 3], ['iPhone 13 Pro Max', 1], ['iPhone 14 Pro Max', 2], ['iPhone 16', 1], ['iPhone 17', 0]]),
   design('Flower bouquet', 'Flower_bouquet.png', [['iPhone 12', 6], ['iPhone 12 Pro Max', 3], ['iPhone 13 Pro Max', 2], ['iPhone 14 Pro Max', 4], ['iPhone 15 Pro Max', 2], ['iPhone 16', 2], ['iPhone 17', 2]]),
   design('Bow cherry iconic', 'Bow_cherry_iconic.png', [['iPhone 12', 3], ['iPhone 13', 2], ['iPhone 13 Pro Max', 6], ['iPhone 14', 5], ['iPhone 15', 3], ['iPhone 15 Pro Max', 2], ['iPhone 16 Pro Max', 3], ['iPhone 17', 2]]),
@@ -57,7 +60,10 @@ const CATALOG = [
   design('Glossy white', 'Glossy_white.png', [['iPhone 13 Pro', 2], ['iPhone 14', 1]]),
   design('Glossy black', 'Glossy_black.png', [['iPhone 13 Pro', 2], ['iPhone 14', 1]]),
   design('Shiny pink bow', 'Shiny_pink_bow.png', [['iPhone 14 Pro', 1], ['iPhone 16 Pro', 1]]),
-  design('Shiny leopard', 'Shiny_leopard.png', [['iPhone 13 Pro', 4], ['iPhone 14 Pro', 1], ['iPhone 15 Pro', 2], ['iPhone 15 Pro Max', 1]]),
+  // iPhone 13 Pro / 15 Pro / 15 Pro Max variants were created here by an earlier,
+  // corrected mistake (those units are Chetah iconic, not Shiny leopard); kept at
+  // 0 rather than removed, per "do not delete historical variants".
+  design('Shiny leopard', 'Shiny_leopard.png', [['iPhone 13 Pro', 0], ['iPhone 14 Pro', 1], ['iPhone 15 Pro', 0], ['iPhone 15 Pro Max', 0]]),
   design('Cherry bow', 'Cherry_bow.png', [['iPhone 15', 5]]),
   design('Ying', 'Ying.png', [['iPhone 15', 2]]),
   design('Pink Floral', 'Pink_floral.png', [['iPhone 15 Pro', 3], ['iPhone 16', 3], ['iPhone 16 Pro', 3], ['iPhone 16 Pro Max', 3], ['iPhone 17', 1], ['iPhone 17 Pro', 4], ['iPhone 17 Pro Max', 3]]),
@@ -91,7 +97,7 @@ function validateCatalog() {
     }
   }
   const total = CATALOG.flatMap((item) => item.variants).reduce((sum, [, quantity]) => sum + quantity, 0);
-  if (CATALOG.length !== 37 || seen.size !== 123 || total !== 257) {
+  if (CATALOG.length !== 37 || seen.size !== 125 || total !== 263) {
     throw new Error(`Reconciliation invariant failed: products=${CATALOG.length}, variants=${seen.size}, stock=${total}`);
   }
   return { products: CATALOG.length, variants: seen.size, stock: total };
@@ -243,7 +249,7 @@ async function main() {
     return { createdProducts, createdVariants, deactivatedDemoProducts };
   });
   const checks = await verify();
-  if (checks.skuDuplicates || checks.negativeStock || checks.orphanVariants || checks.missingImages || checks.totalStock !== 257 || checks.products !== 37) {
+  if (checks.skuDuplicates || checks.negativeStock || checks.orphanVariants || checks.missingImages || checks.totalStock !== 263 || checks.products !== 37) {
     throw new Error(`Post-import verification failed: ${JSON.stringify(checks)}`);
   }
   console.info(JSON.stringify({ backupPath, ...result, ...checks }, null, 2));
