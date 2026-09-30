@@ -128,6 +128,7 @@ async function createVariantInternal(productId, v, transaction) {
       product_id: productId,
       sku: v.sku,
       price: v.price,
+      compare_at_price: v.compare_at_price ?? null,
       stock_quantity: v.stock_quantity ?? 0,
       is_active: v.is_active ?? true,
     },
@@ -165,6 +166,9 @@ async function updateVariant(productId, variantId, payload) {
       {
         sku: payload.sku ?? variant.sku,
         price: payload.price ?? variant.price,
+        // Omitted (undefined) -> unchanged; explicit null clears it. `??` would
+        // wrongly treat an explicit null as "not provided" and keep the old value.
+        compare_at_price: payload.compare_at_price !== undefined ? payload.compare_at_price : variant.compare_at_price,
         is_active: payload.is_active ?? variant.is_active,
       },
       { transaction: t }

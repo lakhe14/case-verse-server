@@ -17,6 +17,9 @@ const slugParam = z.object({ slug: z.string().trim().min(1).max(220) });
 const variantInput = z.object({
   sku: shortText(64),
   price: z.coerce.number().nonnegative(),
+  // The regular reference price shown next to a lower active sale price.
+  // Omitted -> unchanged/null (see admin.catalog.service.js); explicit null clears it.
+  compare_at_price: z.coerce.number().nonnegative().nullable().optional(),
   stock_quantity: z.coerce.number().int().min(0),
   is_active: z.boolean().default(true),
   attributes: z
