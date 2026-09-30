@@ -8,9 +8,9 @@ const beforeWindow = new Date(DASHAIN_CAMPAIGN.starts_at.getTime() - 1000);
 const afterWindow = DASHAIN_CAMPAIGN.ends_at;
 
 describe('campaign window', () => {
-  it('is a fixed 14-day span', () => {
-    const days = (DASHAIN_CAMPAIGN.ends_at - DASHAIN_CAMPAIGN.starts_at) / (24 * 60 * 60 * 1000);
-    expect(days).toBe(14);
+  it('ends_at is the owner-confirmed extended date, strictly after starts_at', () => {
+    expect(DASHAIN_CAMPAIGN.ends_at.toISOString()).toBe(new Date('2026-10-31T23:59:59+05:45').toISOString());
+    expect(DASHAIN_CAMPAIGN.ends_at.getTime()).toBeGreaterThan(DASHAIN_CAMPAIGN.starts_at.getTime());
   });
 
   it('is active inside the window', () => {
@@ -23,6 +23,22 @@ describe('campaign window', () => {
 
   it('is inactive once the window ends (end is exclusive)', () => {
     expect(isActive(afterWindow)).toBe(false);
+  });
+
+  it('is active on October 31 before 23:59:59 Nepal time', () => {
+    expect(isActive(new Date('2026-10-31T23:59:58+05:45'))).toBe(true);
+  });
+
+  it('is inactive at and after the October 31 23:59:59 Nepal-time deadline', () => {
+    expect(isActive(new Date('2026-10-31T23:59:59+05:45'))).toBe(false);
+    expect(isActive(new Date('2026-11-01T00:00:00+05:45'))).toBe(false);
+  });
+
+  it('no timezone regression: the same instant in a different offset still resolves correctly', () => {
+    // 2026-10-31T23:59:58+05:45 == 2026-10-31T18:14:58Z
+    expect(isActive(new Date('2026-10-31T18:14:58Z'))).toBe(true);
+    // 2026-10-31T23:59:59+05:45 == 2026-10-31T18:14:59Z
+    expect(isActive(new Date('2026-10-31T18:14:59Z'))).toBe(false);
   });
 
   it('getCampaign never leaks a mutable reference', () => {

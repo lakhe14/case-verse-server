@@ -5,11 +5,9 @@
  * eligibility or pricing may be decided on the client — every consumer
  * (cart, checkout, order creation, the public banner) reads this window.
  *
- * PLACEHOLDER DATES: `starts_at`/`ends_at` below are a literal fixed
- * 14-day window seeded from today's date, not the real Nepali Dashain
- * calendar date. The store owner must confirm the actual campaign dates
- * and this file must be updated with the real fixed timestamps before
- * the campaign is announced publicly.
+ * Owner-confirmed dates. `ends_at` was extended from 2026-10-06T00:00:00+05:45
+ * to 2026-10-31T23:59:59+05:45 on 2026-10-01; pricing/eligibility rules are
+ * unchanged by that extension.
  */
 const DASHAIN_CAMPAIGN = Object.freeze({
   code: 'DASHAIN_2026',
@@ -21,7 +19,7 @@ const DASHAIN_CAMPAIGN = Object.freeze({
   advance_amount: 100,
   // Fixed, shared window — computed once here, never re-derived from "now".
   starts_at: new Date('2026-09-22T00:00:00+05:45'),
-  ends_at: new Date('2026-10-06T00:00:00+05:45'),
+  ends_at: new Date('2026-10-31T23:59:59+05:45'),
 });
 
 /** True while `now` falls inside the fixed campaign window. Server-authoritative. */
