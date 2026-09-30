@@ -52,6 +52,7 @@ const SKU = {
   pinkBow17: skuFor('Pink love bow', 'iPhone 17'),
   pinkFloral15Pro: skuFor('Pink Floral', 'iPhone 15 Pro'),
   stockProbe: skuFor('E2E Stock probe', 'iPhone 15'),
+  tracking: skuFor('E2E Tracking fixture', 'iPhone 12'),
 };
 
 async function variant(sku) {

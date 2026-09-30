@@ -36,31 +36,53 @@ function design(name, image, variants) {
 }
 
 // One design is one product; the spreadsheet models below are variants.
+// Reconciled 2026-09-30 against server/data/Phone_Cover_Stock_List.xlsx (authoritative
+// physical count). See server/.tmp/catalog-backups for the pre-reconciliation snapshot
+// and the import report for what changed and what was left unresolved.
 const CATALOG = [
-  design('Flame Black', 'Flame_black.png', [['iPhone 11 Pro', 1], ['iPhone 13 Pro', 2], ['iPhone 14', 3], ['iPhone 14 Pro', 1]]),
+  design('Flame Black', 'Flame_black.png', [['iPhone 11 Pro', 1], ['iPhone 13 Pro', 2], ['iPhone 14', 1], ['iPhone 14 Pro', 1]]),
   design('Flame silver', 'Flame_silver.png', [['iPhone 11 Pro', 1]]),
   design('Cast case Black', 'Cat_black.png', [['iPhone 11 Pro Max', 1], ['iPhone 16', 1]]),
   design('Cat Case Sky blue', 'Cat_skyblue.png', [['iPhone 16 Pro Max', 1]]),
   design('Shiny bow iconic', 'Shiny_bow_iconic.png', [['iPhone 11 Pro Max', 1], ['iPhone 12', 3], ['iPhone 12 Pro Max', 2], ['iPhone 13', 3], ['iPhone 13 Pro', 2], ['iPhone 13 Pro Max', 1], ['iPhone 14', 1], ['iPhone 14 Pro', 2], ['iPhone 15 Pro', 1], ['iPhone 16 Pro Max', 1]]),
-  design('Chetah iconic', 'Chetah_iconic.png', [['iPhone 11 Pro Max', 1], ['iPhone 12', 4], ['iPhone 12 Pro Max', 2], ['iPhone 13', 4], ['iPhone 13 Pro', 4], ['iPhone 13 Pro Max', 3], ['iPhone 14', 5], ['iPhone 14 Pro', 2], ['iPhone 15 Pro', 2], ['iPhone 15 Pro Max', 1]]),
-  design('Pink love bow', 'Pink_love_bow.png', [['iPhone 12', 5], ['iPhone 12 Pro Max', 4], ['iPhone 13 Pro Max', 1], ['iPhone 14 Pro Max', 2], ['iPhone 16', 1], ['iPhone 17', 1]]),
+  // "Chetah" and "Chetah shiny iconic" rows are the same physical design as
+  // "Chetah iconic" (owner-confirmed) and are folded in here, not split out.
+  // Shiny leopard is a different design and keeps its own direct sheet row.
+  design('Chetah iconic', 'Chetah_iconic.png', [['iPhone 11', 3], ['iPhone 11 Pro Max', 3], ['iPhone 12', 4], ['iPhone 12 Pro Max', 4], ['iPhone 13', 7], ['iPhone 13 Pro', 4], ['iPhone 13 Pro Max', 3], ['iPhone 14', 4], ['iPhone 14 Pro', 2], ['iPhone 14 Pro Max', 2], ['iPhone 15', 2], ['iPhone 15 Pro', 2], ['iPhone 15 Pro Max', 3], ['iPhone 16', 1], ['iPhone 16 Pro', 2], ['iPhone 16 Pro Max', 2]]),
+  design('Pink love bow', 'Pink_love_bow.png', [['iPhone 12', 5], ['iPhone 12 Pro Max', 3], ['iPhone 13 Pro Max', 1], ['iPhone 14 Pro Max', 2], ['iPhone 16', 1], ['iPhone 17', 0]]),
   design('Flower bouquet', 'Flower_bouquet.png', [['iPhone 12', 6], ['iPhone 12 Pro Max', 3], ['iPhone 13 Pro Max', 2], ['iPhone 14 Pro Max', 4], ['iPhone 15 Pro Max', 2], ['iPhone 16', 2], ['iPhone 17', 2]]),
-  design('Bow cherry iconic', 'Bow_cherry_iconic.png', [['iPhone 12', 3], ['iPhone 13', 3], ['iPhone 13 Pro Max', 6], ['iPhone 14', 5], ['iPhone 15', 3], ['iPhone 15 Pro Max', 2], ['iPhone 16 Pro Max', 1], ['iPhone 17', 2]]),
+  design('Bow cherry iconic', 'Bow_cherry_iconic.png', [['iPhone 12', 3], ['iPhone 13', 2], ['iPhone 13 Pro Max', 6], ['iPhone 14', 5], ['iPhone 15', 3], ['iPhone 15 Pro Max', 2], ['iPhone 16 Pro Max', 3], ['iPhone 17', 2]]),
   design('Hello kitty', 'Hello_kitty.png', [['iPhone 12 Pro Max', 2], ['iPhone 13 Pro Max', 1]]),
-  design('Evil eye', 'Evileye.png', [['iPhone 12 Pro Max', 1], ['iPhone 13 Pro Max', 2]]),
-  design('Polka red', 'Polka_red.jpeg', [['iPhone 13', 4], ['iPhone 14', 5]]),
+  design('Evil eye', 'Evileye.png', [['iPhone 12 Pro Max', 0], ['iPhone 13 Pro', 2], ['iPhone 13 Pro Max', 2]]),
+  design('Polka red', 'Polka_red.jpeg', [['iPhone 13', 4], ['iPhone 14', 4]]),
   design('Tulip shiny iconic', 'Tulip_iconic.png', [['iPhone 13 Pro', 1], ['iPhone 13 Pro Max', 3], ['iPhone 15 Pro', 1], ['iPhone 15 Pro Max', 2]]),
   design('Flower Bird', 'Flower_bird.png', [['iPhone 13 Pro Max', 1], ['iPhone 15 Pro Max', 2]]),
-  design('Glossy white', 'Glossy_white.png', [['iPhone 14', 1]]),
-  design('Glossy black', 'Glossy_black.png', [['iPhone 14', 1]]),
-  design('Shiny pink bow', 'Shiny_pink_bow.png', [['iPhone 14 Pro', 1]]),
-  design('Shiny leopard', 'Shiny_leopard.png', [['iPhone 14 Pro', 1]]),
+  design('Glossy white', 'Glossy_white.png', [['iPhone 13 Pro', 2], ['iPhone 14', 1]]),
+  design('Glossy black', 'Glossy_black.png', [['iPhone 13 Pro', 2], ['iPhone 14', 1]]),
+  design('Shiny pink bow', 'Shiny_pink_bow.png', [['iPhone 14 Pro', 1], ['iPhone 16 Pro', 1]]),
+  // iPhone 13 Pro / 15 Pro / 15 Pro Max variants were created here by an earlier,
+  // corrected mistake (those units are Chetah iconic, not Shiny leopard); kept at
+  // 0 rather than removed, per "do not delete historical variants".
+  design('Shiny leopard', 'Shiny_leopard.png', [['iPhone 13 Pro', 0], ['iPhone 14 Pro', 1], ['iPhone 15 Pro', 0], ['iPhone 15 Pro Max', 0]]),
   design('Cherry bow', 'Cherry_bow.png', [['iPhone 15', 5]]),
   design('Ying', 'Ying.png', [['iPhone 15', 2]]),
-  design('Pink Floral', 'Pink_floral.png', [['iPhone 15 Pro', 3], ['iPhone 17 Pro', 1]]),
-  design('Blue floral', 'Blue_floral.png', [['iPhone 15 Pro', 2], ['iPhone 16 Pro', 1], ['iPhone 17', 1], ['iPhone 17 Pro', 2], ['iPhone 17 Pro Max', 1]]),
-  design('Polka dot', 'Polka_dot.png', [['iPhone 16', 1]]),
-  design('Luffy Gear 5', 'Luffy.png', [['iPhone 16', 1]]),
+  design('Pink Floral', 'Pink_floral.png', [['iPhone 15 Pro', 3], ['iPhone 16', 3], ['iPhone 16 Pro', 3], ['iPhone 16 Pro Max', 3], ['iPhone 17', 1], ['iPhone 17 Pro', 4], ['iPhone 17 Pro Max', 3]]),
+  design('Blue floral', 'Blue_floral.png', [['iPhone 15 Pro', 2], ['iPhone 16', 3], ['iPhone 16 Pro', 4], ['iPhone 17', 3], ['iPhone 17 Pro', 5], ['iPhone 17 Pro Max', 4]]),
+  design('Polka dot', 'Polka_dot.png', [['iPhone 14 Pro Max', 4], ['iPhone 16', 1], ['iPhone 16 Pro Max', 2], ['iPhone 17 Pro Max', 2]]),
+  design('Luffy Gear 5', 'Luffy.png', [['iPhone 16', 0]]),
+  design('Amor', 'Amor.png', [['iPhone 17 Pro', 1]]),
+  design('Bloom Blue Bow', 'Bloom_blue_bow.png', [['iPhone 11 Pro Max', 2]]),
+  design('Bloom Evil', 'Bloom_evil.png', [['iPhone 11', 1], ['iPhone 11 Pro Max', 1], ['iPhone 12 Pro Max', 1], ['iPhone 14 Pro Max', 1], ['iPhone 17 Pro Max', 1]]),
+  design('Bloom Mix Flower', 'Bloom_mix_flower.png', [['iPhone 17 Pro', 2]]),
+  design('Glossy Red', 'Glossy_red.png', [['iPhone 12', 2], ['iPhone 13 Pro', 2]]),
+  design('Glossy Transparent', 'Glossy_transparent.png', [['iPhone 12', 2], ['iPhone 14', 1]]),
+  design('Laces', 'Laces.png', [['iPhone 12 Pro Max', 2], ['iPhone 13 Pro Max', 2], ['iPhone 14', 2], ['iPhone 15', 2], ['iPhone 17', 2], ['iPhone 17 Pro Max', 2]]),
+  design('Purple Jasmin', 'Purple_jasmin.png', [['iPhone 11 Pro Max', 2], ['iPhone 12', 1], ['iPhone 15 Pro Max', 1], ['iPhone 17 Pro Max', 1]]),
+  design('Rainbow Black', 'Rainbow_black.png', [['iPhone 17 Pro Max', 1]]),
+  design('Rainbow Blue', 'Rainbow_blue.png', [['iPhone 14', 1]]),
+  design('Rainbow Pink', 'Rainbow_pink.png', [['iPhone 11', 1]]),
+  design('Rainbow Purple', 'Rainbow_purple.png', [['iPhone 15', 1]]),
+  design('Rainbow White', 'Rainbow_white.png', [['iPhone 11', 1]]),
 ];
 
 function validateCatalog() {
@@ -75,7 +97,7 @@ function validateCatalog() {
     }
   }
   const total = CATALOG.flatMap((item) => item.variants).reduce((sum, [, quantity]) => sum + quantity, 0);
-  if (CATALOG.length !== 24 || seen.size !== 76 || total !== 165) {
+  if (CATALOG.length !== 37 || seen.size !== 125 || total !== 263) {
     throw new Error(`Reconciliation invariant failed: products=${CATALOG.length}, variants=${seen.size}, stock=${total}`);
   }
   return { products: CATALOG.length, variants: seen.size, stock: total };
@@ -227,7 +249,7 @@ async function main() {
     return { createdProducts, createdVariants, deactivatedDemoProducts };
   });
   const checks = await verify();
-  if (checks.skuDuplicates || checks.negativeStock || checks.orphanVariants || checks.missingImages || checks.totalStock !== 165 || checks.products !== 24) {
+  if (checks.skuDuplicates || checks.negativeStock || checks.orphanVariants || checks.missingImages || checks.totalStock !== 263 || checks.products !== 37) {
     throw new Error(`Post-import verification failed: ${JSON.stringify(checks)}`);
   }
   console.info(JSON.stringify({ backupPath, ...result, ...checks }, null, 2));
